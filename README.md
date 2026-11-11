@@ -112,3 +112,10 @@ node tools/cdp.mjs "http://127.0.0.1:8765/?style=cel&fly&v=8&len=260&q=0" --vide
 - 隧道（荷兰隧道、NJ 139 下层）仍然没有。
 - 右后视镜挪到了引擎盖右前角上方（翼子板后视镜的位置），正前方视野里一直能看到。
 - `?spot=highway`（加 `&ramp` 看匝道）直接把车放到高架上。
+
+### 第六轮：隧道、分区地图、新课程
+
+- 隧道：荷兰隧道引道和 NJ 139 下层（范围内约 0.9 公里）。高度为负，引道上方的地面开洞，两侧洞壁砌到地面，完全进洞后有洞顶。
+- 分区：`tools/regions.json` 定义三个区域（市中心、Journal Square、Newark 市中心），各一张独立地图。`node tools/fetch_osm.mjs <id>` 下载、`node tools/build_map.mjs <id>` 构建；游戏里在开始界面选，或 `?map=jsq|newark`。新区域的原始数据不进 git。
+- 新课程 11–15：变道、上高速、直线倒车、三点掉头、侧方停车（后三个是新泽西路考项目）。位置 / 动作类的进度在 `main.js` 的 `lessonSim` 里算。
+- `cover.png` / `cover_en.png`：封面。

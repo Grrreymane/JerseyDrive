@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { prepareMap, signalState, laneCenter, offsetPoint, pointAt, segY, CAR } from './sim/map.js';
+import { prepareMap, signalState, laneCenter, laneInfo, offsetPoint, pointAt, segY, CAR } from './sim/map.js';
 import { makeCar, stepCar, setSignal, shift, carCenter, MPH, GEARS } from './sim/car.js';
 import { makeTraffic, stepTraffic } from './sim/traffic.js';
 import { buildActors } from './view/actors.js';
@@ -280,7 +280,7 @@ function simStep(lookT) {
   if (trafficOn) stepActors(DT);
   stepRules(S.R, S.car, map, S.t, DT, trafficOn ? T : null); S.t += DT; S.driveTime += DT;
   showEvents();
-  if (trafficOn && lesson && S.R.cur && S.R.cur.seg.speed >= 35) { const mph = Math.abs(S.car.v) * MPH; if (mph >= 22 && mph <= S.R.cur.seg.speed + 3.5) lesson.fast += Math.abs(S.car.v) * DT; }
+  lessonSim();
   if (S.R.needReset) {
     // 撞了：先停在原地 1.7 秒（泛红、闷响、被撞的人倒地、被撞的车打双闪），再退回去
     const hit = S.R.events.find(e => e.type === 'crash' || e.type === 'hit_car' || e.type === 'hit_ped');
@@ -428,8 +428,41 @@ window.__jd.ready = true;
 let lesson = null, stars = {};
 try { stars = JSON.parse(localStorage.getItem('jdLessons') || '{}'); } catch { /* 存不了就不记 */ }
 /** 出发点：离地图中心最近、符合这节课要求的地方 */
+// 侧方停车的目标车位：绿色的框
+const marker = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 2.2), new THREE.MeshBasicMaterial({ color: 0x35e07a, transparent: true, opacity: 0.45, depthWrite: false })); marker.visible = false; marker.renderOrder = 5; scene.add(marker);
+let parkSpot = null; const PC2 = {};
+/** 每一步：这节课里靠位置 / 动作判断的进度（限速路段里程、倒车距离、掉头、停进车位） */
+function lessonSim() {
+  const L = lesson, c = S.car, cur = S.R.cur; if (!L || !cur || L.over) return;
+  const mph = Math.abs(c.v) * MPH, min = L.def.fastMin || 35;
+  if (cur.seg.speed >= min && mph >= cur.seg.speed * 0.62 && mph <= cur.seg.speed + 3.5) L.fast += Math.abs(c.v) * DT;
+  if (c.gear === 'R' && c.v < -0.3 && !cur.junc) L.x.rev = (L.x.rev || 0) - c.v * DT;
+  if (L.kt && cur.seg === L.kt.seg && cur.fwd !== L.kt.fwd && !cur.junc && laneInfo(cur.seg, cur.o, cur.fwd).side === 'ok') L.x.kturn = 1;
+  if (L.spot) { carCenter(c, PC2); let dh = c.h - L.spot.h; while (dh > Math.PI) dh -= 2 * Math.PI; while (dh < -Math.PI) dh += 2 * Math.PI; if (Math.hypot(PC2.x - L.spot.x, PC2.z - L.spot.z) < 1.25 && Math.abs(dh) < 0.2 && c.gear === 'P') L.x.park = 1; }
+}
+const laneStart = (g, u, fwd = true) => { const q = offsetPoint(g, u, laneCenter(g, fwd, (fwd ? g.lf : g.lb) - 1), {}), h = Math.atan2(q.dz, q.dx) + (fwd ? 0 : Math.PI); return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h, y: segY(g, u) }; };
+const nearest = (pred) => { let best = null, bd = 1e9; for (const g of map.segs) { if (!pred(g)) continue; const d = Math.hypot(g.px[0], g.pz[0]); if (d < bd) { bd = d; best = g; } } return best; };
 function findStart(kind) {
   if (kind === 'default') return startPose;
+  if (kind === 'multi') { const g = nearest(g => g.lf >= 2 && g.useLen > 220 && g.speed <= 35 && !g.high); return g ? laneStart(g, g.trimA + 15) : startPose; }
+  if (kind === 'twoway') { const g = nearest(g => g.lb === 1 && g.lf === 1 && g.cls === 'residential' && g.useLen > 90 && !g.high); return g ? laneStart(g, g.trimA + 30) : startPose; }
+  if (kind === 'highway') {
+    const g = nearest(g => g.high && g.ys[0] < 0.5 && Math.max(...g.ys) > 6 && g.len > 80) || map.segs.filter(g => g.high && g.speed >= 45).sort((a, b) => b.len - a.len)[0];
+    if (g) return laneStart(g, g.trimA + 8); kind = 'fast';
+  }
+  if (kind === 'park') {
+    // 找一个真的空车位：路右边相邻两辆停着的车之间正好空出一辆车的位置
+    if (!parkSpot) {
+      const by = new Map(), L = {}; for (const p of map.parked) { let a = by.get(p.seg); if (!a) by.set(p.seg, a = []); a.push(p); }
+      let bd = 1e9;
+      for (const [id, list] of by) {
+        const g = map.segs[id]; if (!g || g.speed > 25 || g.useLen < 70) continue;
+        const ss = []; for (const p of list) { map.locate(p.x, p.z, L); if (L.seg === g && L.o > 0) ss.push(L.s); } ss.sort((a, b) => a - b);
+        for (let i = 1; i < ss.length; i++) { const gap = ss[i] - ss[i - 1]; if (gap < 11.5 || gap > 13.5 || ss[i - 1] - g.trimA < 26) continue; const u = (ss[i] + ss[i - 1]) / 2, q = offsetPoint(g, u, g.halfW - 1.15, {}), d = Math.hypot(q.x, q.z); if (d < bd) { bd = d; parkSpot = { x: q.x, z: q.z, h: Math.atan2(q.dz, q.dx), g, u }; } }
+      }
+    }
+    return parkSpot ? laneStart(parkSpot.g, parkSpot.u - 16) : startPose;
+  }
   let best = null, bd = 1e9;
   if (kind === 'fast') {
     for (const s of map.segs) { if (s.speed < 35 || s.useLen < 220) continue; const d = Math.hypot(s.px[0], s.pz[0]); if (d < bd) { bd = d; best = s; } }
@@ -449,11 +482,14 @@ function findStart(kind) {
 }
 function startLesson(i) {
   const def = LESSONS[i]; restart(); placeCar(findStart(def.start));
-  lesson = { i, def, log0: 0, odo0: 0, fast: 0, over: false };
+  lesson = { i, def, log0: 0, odo0: 0, fast: 0, over: false, x: {}, kt: null, spot: null };
+  const cur0 = map.locate(S.car.x, S.car.z, {}, S.car.y || 0); if (def.start === 'twoway' && cur0.seg) lesson.kt = { seg: cur0.seg, fwd: Math.cos(S.car.h) * cur0.dx + Math.sin(S.car.h) * cur0.dz >= 0 };
+  marker.visible = false;
+  if (def.start === 'park' && parkSpot) { lesson.spot = parkSpot; marker.position.set(parkSpot.x, 0.04, parkSpot.z); marker.rotation.set(-Math.PI / 2, 0, -parkSpot.h); marker.visible = true; marker.updateMatrixWorld(true); }
   for (const id of ['start', 'pause', 'lessonDone']) show(id, false); start(); lessonTick();
   toast({ sev: 'info' }, `第 ${i + 1} 课：${def.title}`, def.brief, 12000);
 }
-function endLesson() { lesson = null; show('lessonBox', false); }
+function endLesson() { lesson = null; marker.visible = false; show('lessonBox', false); }
 let lessonKey = '';
 function lessonTick() {
   if (!lesson) { show('lessonBox', false); return; }

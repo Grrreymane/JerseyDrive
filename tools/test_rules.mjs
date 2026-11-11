@@ -23,7 +23,7 @@ function run(car, t0, secs, ctl) {
   const R = makeRules(); const evs = []; let t = t0;
   for (let i = 0; i < secs * 60; i++) {
     const inp = ctl(car, R, t) || { throttle: 0, brake: 0, steer: 0 };
-    stepCar(car, { throttle: 0, brake: 0, steer: 0, analog: true, ...inp }, 1 / 60); stepRules(R, car, map, t, 1 / 60); evs.push(...R.events.map(e => e.type).filter(x => x !== 'good_signal'));
+    stepCar(car, { throttle: 0, brake: 0, steer: 0, analog: true, ...inp }, 1 / 60); stepRules(R, car, map, t, 1 / 60); evs.push(...R.events.map(e => e.type).filter(x => x !== 'good_signal' && x !== 'good_lane'));
     if (R.needReset) break; t += 1 / 60;
   }
   return evs;
@@ -134,7 +134,7 @@ function botTurn(dir, opts = {}) {
     }
     if (R.phase === 'junc' && car.v > 3.4) { inp.throttle = 0; inp.brake = 0.2; }
     stepCar(car, inp, 1 / 60); stepRules(R, car, map, t, 1 / 60); t += 1 / 60;
-    for (const e of R.events) if (e.type !== 'good_signal') log.push(e.type);
+    for (const e of R.events) if (e.type !== 'good_signal' && e.type !== 'good_lane') log.push(e.type);
     if (R.needReset) { log.push('RESET'); break; }
     if (pi >= path.length - 10) break;
   }

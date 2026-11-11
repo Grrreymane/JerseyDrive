@@ -53,6 +53,31 @@ export const LESSONS = [
     goals: [{ k: 'dist', n: 1200, text: '行驶 1.2 公里' }, { k: 'ev', ev: 'good_stop', n: 2, text: 'STOP 停稳 2 次' }, { k: 'ev', ev: 'good_signal', n: 2, text: '通过 2 个红绿灯' }, { k: 'ev', ev: 'good_turn', turn: 'left', n: 1, text: '左转 1 次' }, { k: 'ev', ev: 'good_turn', turn: 'right', n: 1, text: '右转 1 次' }, { k: 'score', n: 80, text: '得分不低于 80' }],
     forbid: ['hit_ped'],
   },
+  {
+    title: '变道', start: 'multi',
+    brief: '先打灯（Q / E），看后视镜，再回头看一眼盲区（Z / 按住 X），确认没车再平顺地并过去。',
+    goals: [{ k: 'ev', ev: 'good_lane', n: 3, text: '打灯变道 3 次' }], forbid: ['lane_no_signal', 'hit_car'],
+  },
+  {
+    title: '上高速', start: 'highway', fastMin: 45,
+    brief: '匝道上就把速度加起来，打左灯，从后视镜找空当并进去。高速上保持车速，别比车流慢太多；没有 STOP 也没有红绿灯。',
+    goals: [{ k: 'fast', n: 600, text: '在限速 45 以上的路上按限速开 600 米' }], forbid: ['speeding', 'hit_car'],
+  },
+  {
+    title: '直线倒车', start: 'default',
+    brief: '路考项目。踩刹车挂 R（按 2），回头看（Z + X 一起按）或看后视镜，松刹车让车慢慢退，方向盘只做很小的修正。',
+    goals: [{ k: 'x', id: 'rev', n: 15, text: '直线倒车 15 米，不碰任何东西' }], forbid: ['crash', 'hit_car', 'hit_ped', 'off_road'],
+  },
+  {
+    title: '三点掉头（K 字掉头）', start: 'twoway',
+    brief: '路考项目。靠右停 → 打左灯，方向盘向左打死往前到对面路边 → 挂 R，向右打死倒回来 → 挂 D 开走。每一步动之前都看两边有没有车。',
+    goals: [{ k: 'x', id: 'kturn', n: 1, text: '在这条街上掉头，开到对向车道' }], forbid: ['off_road', 'hit_car', 'hit_ped'],
+  },
+  {
+    title: '侧方停车', start: 'park',
+    brief: '路考项目。开到车位前面那辆车旁边，并排、车尾对齐 → 挂 R，向右打死倒到车身 45° → 回正再倒 → 向左打死摆正。停进绿框后挂 P。',
+    goals: [{ k: 'x', id: 'park', n: 1, text: '停进绿框，摆正，挂 P' }], forbid: ['hit_ped'],
+  },
 ];
 
 /** 这节课每个目标做到哪了。L = { def, log0, odo0, fast }；返回 { rows: [{ text, cur, n, done }], done, failed: 事件类型或 null, penalty } */
@@ -63,6 +88,7 @@ export function lessonState(L, R, car) {
     if (g.k === 'dist') cur = Math.floor(car.odo - L.odo0);
     else if (g.k === 'fast') cur = Math.floor(L.fast);
     else if (g.k === 'score') cur = 100 - penalty;
+    else if (g.k === 'x') cur = Math.floor(L.x[g.id] || 0);
     else cur = log.filter(e => e.type === g.ev && (!g.turn || e.turn === g.turn)).length;
     return { text: g.text, cur: Math.min(cur, g.k === 'score' ? 100 : g.n), n: g.n, done: cur >= g.n, k: g.k };
   });

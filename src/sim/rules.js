@@ -8,7 +8,7 @@ export const PENALTY = {
   no_yield: 15, no_yield_ped: 15, hit_ped: 30, hit_car: 20,
   speeding: 8, no_signal: 5, late_signal: 2, wrong_lane_from: 5, wrong_lane_into: 5, lane_no_signal: 4, over_line: 3,
 };
-const SEV = { good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor' };
+const SEV = { good_lane: 'good', good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor' };
 
 export function makeRules() {
   return {
@@ -158,6 +158,7 @@ export function stepRules(R, car, map, t, dt, T = null) {
           if (fp > L.idx + 1.12 || fp < L.idx - 0.12) {
             const dir = li.idx > L.idx ? 1 : -1;
             if (moving && car.signal !== dir) emit(R, 'lane_no_signal', car, t, street, { dir });
+            else if (moving) emit(R, 'good_lane', car, t, street, { dir });
             L.idx = li.idx;
           }
         } else R.lane = { key, idx: li.idx };

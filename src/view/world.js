@@ -83,7 +83,7 @@ export function buildWorld(map, scene) {
     const F = 4, N = 12, holes = new Set(), P = {};
     for (const s of map.segs) {
       if (!s.ys) continue;
-      for (let u = 0; u <= s.len; u += 2) { const y = segY(s, u); if (y > -0.12 || y < -5.6) continue; pointAt(s, u, P); for (let o = -s.halfW - 1.2; o <= s.halfW + 1.2; o += 2) holes.add(Math.floor((P.x - P.dz * o) / F) + ',' + Math.floor((P.z + P.dx * o) / F)); }
+      for (let u = 0; u <= s.len; u += 2) { const y = segY(s, u); if (y > -0.02 || y < -5.6) continue; pointAt(s, u, P); for (let o = -s.halfW - 1.2; o <= s.halfW + 1.2; o += 2) holes.add(Math.floor((P.x - P.dz * o) / F) + ',' + Math.floor((P.z + P.dx * o) / F)); }
     }
     const big = new Set(); for (const k of holes) { const [a, b] = k.split(',').map(Number); big.add(Math.floor(a / N) + ',' + Math.floor(b / N)); }
     const S = F * N, nx = Math.ceil(X / S), nz = Math.ceil(Z / S);
@@ -207,9 +207,11 @@ export function buildWorld(map, scene) {
   // 高度来自地图数据（seg.ys）：高架段在 7.5 米，匝道按 5.5% 的坡接到地面。用正常的深度测试画，和地面那几层互不干扰
   {
     const Gb = new ChunkGeo(), Gbm = new ChunkGeo(), DECK = lin('#5d626d'), CONC = lin('#b9b6ae'), CONC_D = lin('#9a978f'), WH = [0.97, 0.97, 0.97], YE = lin('#ffc61a'), UPN = [0, 1, 0], DN = [0, -1, 0], LIFT = 0.05, TH = 0.9;
+    // 贴近地面的那一段要画在人行道那层（0.15 米）上面，不然匝道口会被地面盖住；往上、往下离开地面后回到真实高度
+    const drawY = (y) => y >= 0 ? Math.max(y + LIFT, CH + 0.03) : y + LIFT + 0.13 * Math.max(0, 1 + y / 0.6);
     const fine = (seg, sA, sB) => {      // 比地面路切得密一点：坡道要跟着高度走
       const out = [], P = {}; const n = Math.max(1, Math.ceil((sB - sA) / 8));
-      for (let i = 0; i <= n; i++) { const u = sA + (sB - sA) * i / n; pointAt(seg, u, P); out.push({ x: P.x, z: P.z, rx: -P.dz, rz: P.dx, y: segY(seg, u) + LIFT, u }); }
+      for (let i = 0; i <= n; i++) { const u = sA + (sB - sA) * i / n; pointAt(seg, u, P); out.push({ x: P.x, z: P.z, rx: -P.dz, rz: P.dx, y: drawY(segY(seg, u)), u }); }
       return out;
     };
     const pt = (r, o, dy = 0) => [r.x + r.rx * o, r.y + dy, r.z + r.rz * o];
