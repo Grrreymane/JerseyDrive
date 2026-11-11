@@ -51,9 +51,9 @@
 <div id="start" class="overlay">
   <div class="card">
     <h1>泽西城练车</h1>
-    <p class="lead">Jersey City 的真实街道：单行道、红绿灯、STOP 都按实际位置摆放，路上有别的车和行人。跟着课程一节节练，或者直接自由练习，教练会在旁边提醒。</p>
-    <h3>区域</h3>
-    <div id="regionList"></div>
+    <p class="lead">Jersey City、Journal Square 到 Newark 连成一张图的真实街道：单行道、红绿灯、STOP 按实际位置摆放，店名和门牌来自公开地图数据，路上有别的车和行人。跟着课程一节节练，或者挑个地方自由练习，教练会在旁边提醒。</p>
+    <h3>出发地点</h3>
+    <div id="startList"></div>
     <h3>课程</h3>
     <div id="lessonList"></div>
     <div class="cols">
@@ -72,7 +72,7 @@
         <table>
           <tr><td><kbd>Z</kbd> <kbd>X</kbd></td><td>向左看 / 看右后视镜（按住 X 回头看右后方；一起按 = 回头）</td></tr>
           <tr><td><kbd>C</kbd></td><td>切换视角：车内 / 车后 / 俯视</td></tr>
-          <tr><td><kbd>M</kbd></td><td>大地图：点一下设目的地，自动导航</td></tr>
+          <tr><td><kbd>M</kbd></td><td>大地图：搜地址、设目的地导航、换出发点</td></tr>
           <tr><td><kbd>T</kbd></td><td>教练提示 开 / 关</td></tr>
           <tr><td><kbd>G</kbd></td><td>标志图鉴</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>暂停 / 复盘</td></tr>
@@ -107,7 +107,7 @@
     <button id="btnLdMenu" class="ghost">回课程表</button>
   </div>
 </div>
-<div id="bigmap" class="hidden"><canvas id="bigCanvas"></canvas><div id="bigHint">点一下地图设目的地 · 拖动平移 · 滚轮缩放 · M / Esc 关闭</div><button id="btnNavClear" class="hidden">取消导航</button></div>
+<div id="bigmap" class="hidden"><canvas id="bigCanvas"></canvas><div id="bigSearch"><input id="bigQ" placeholder="搜街名 / 门牌 / 店名，例：Grove St、150 Bay St" autocomplete="off" spellcheck="false"><div id="bigRes"></div></div><div id="bigPick" class="hidden"><b id="pickName"></b><button id="btnPickNav">导航到这里</button><button id="btnPickStart">从这里出发</button></div><div id="bigHint">点一下地图选地点 · 拖动平移 · 滚轮缩放 · M / Esc 关闭</div><button id="btnNavClear" class="hidden">取消导航</button></div>
 
 <div id="report" class="overlay hidden"><div class="card wide"><h2>驾驶复盘</h2><div id="reportBody"></div><button id="btnReportClose">关闭</button></div></div>
 <div id="book" class="overlay hidden"><div class="card wide"><h2>标志图鉴</h2><div id="bookBody"></div><button id="btnBookClose">关闭</button></div></div>

@@ -24,6 +24,10 @@ const ROOF = ['#8d949e', '#9a9fa6', '#84898f'].map(lin), STONE = lin('#d6cfbf'),
 const NAMES = ['CAFE', 'DELI', 'PIZZA', 'BOOKS', 'BAKERY', 'BARBER', 'BODEGA', 'LAUNDRY', 'FLOWERS', 'PHARMACY', 'HARDWARE', 'RECORDS', 'TACOS', 'MARKET', 'BAGELS', 'NOODLES'];
 
 const canvasTex = (w, h, draw) => { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; draw(cv.getContext('2d'), w, h); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.wrapS = t.wrapT = THREE.RepeatWrapping; return t; };
+// 真实的店名、楼名、门牌号：每个建筑分块建的时候现画一张小贴图（分块卸掉时一起释放）
+const FONT = (px) => `800 ${px}px "Arial Black", Arial, sans-serif`, meas = document.createElement('canvas').getContext('2d'), TI = new Map();
+const textInfo = (str) => { let t = TI.get(str); if (!t) { meas.font = FONT(44); const w = meas.measureText(str).width, k = Math.min(1, 488 / w); TI.set(str, t = { str, px: 44 * k, w: w * k + 14, hp: Math.max(22, 44 * k * 1.35) }); } return t; };
+const MAJOR = new Set(['primary', 'secondary', 'tertiary', 'trunk']);
 const rnd = (seed) => () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
 
 // ---------- 墙面贴图（都接近白色，乘上顶点色才是墙的颜色） ----------
@@ -98,10 +102,10 @@ function shopGlassTex() {
  */
 export function buildBuildings(map, group, occupy, isFree) {
   const texW = wallTextures(), A = atlasTexture(), bcells = new Map();
-  const newGeos = () => ({ brick: new Geo(), siding: new Geo(), stucco: new Geo(), glass: new Geo(), trim: new Geo(), core: new Geo(), flat: new Geo(), card: new Geo(), pane: new Geo(), I: {} });
+  const newGeos = () => ({ brick: new Geo(), siding: new Geo(), stucco: new Geo(), glass: new Geo(), trim: new Geo(), core: new Geo(), flat: new Geo(), card: new Geo(), pane: new Geo(), I: {}, lab: [] });
   const inPolyV = (pts, x, z) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a.y > z) !== (b.y > z) && x < (b.x - a.x) * (z - a.y) / (b.y - a.y) + a.x) c = !c; } return c; };
-  const LOC = {}, PT = {}; let nWin = 0, nShop = 0;
-  const samples = { shop: [], stoop: [], win: [] };      // 出样板截图用：几种立面各记一些位置
+  const LOC = {}, PT = {}; let nWin = 0, nShop = 0, nNum = 0, nName = 0;
+  const samples = { shop: [], stoop: [], win: [], num: [], name: [] };      // 出样板截图用：几种立面各记一些位置
 
   // 一栋楼的全部几何，写进它所在分块 C 的各个 Geo 里
   const genBuilding = (b, bi, C) => {
@@ -112,21 +116,23 @@ export function buildBuildings(map, group, occupy, isFree) {
     if (area > 0) pts.reverse();                 // 统一绕向，墙面法线朝外
     const fa = Math.abs(area) / 2, gh = Math.min(GROUND_H, h * 0.6), small = fa < 170 && h < 15;
     // ---- 这栋楼的样式（全部由楼的编号决定，每次打开都一样） ----
-    const type = tall ? 'glass' : small ? (R(1) < 0.42 ? 'siding' : R(1) < 0.9 ? 'brick' : 'stucco') : (R(1) < 0.58 ? 'brick' : R(1) < 0.9 ? 'stucco' : 'siding');
+    const plain = b.k === 'i', names = b.nm || null; let ni = 0, numDone = !b.no, nameDone = !b.n;
+    const type = tall ? 'glass' : plain ? (R(1) < 0.6 ? 'stucco' : 'siding') : small ? (R(1) < 0.42 ? 'siding' : R(1) < 0.9 ? 'brick' : 'stucco') : (R(1) < 0.58 ? 'brick' : R(1) < 0.9 ? 'stucco' : 'siding');
     const col = PAL[type][Math.floor(R(2) * PAL[type].length)], G = C[type], [TW, TH] = TEX_M[type];
     const trim = type === 'siding' ? TRIMS[Math.floor(R(3) * 3)] : TRIMS[Math.floor(R(3) * TRIMS.length)];
     const wk = type === 'siding' ? (R(4) < 0.65 ? 'C' : 'A') : type === 'brick' ? (R(4) < 0.65 ? 'A' : 'B') : (R(4) < 0.6 ? 'B' : 'A');
     const [nomW, nomH] = K.KIT['win' + wk], bayW = (wk === 'B' ? 3.3 : wk === 'C' ? 3.1 : 2.7) + R(5) * 0.6, wwS = nomW * (0.95 + R(6) * 0.15);
     const winCol = wk === 'C' ? DOORS[Math.floor(R(7) * DOORS.length)] : trim, doorCol = DOORS[Math.floor(R(8) * DOORS.length)];
-    const shop = gh >= 3.3 && (tall || (fa < 160 ? hash(bi * 13 + 5) >= 0.75 : hash(bi * 13 + 5) >= 0.25)), sy = gh / GROUND_H;
+    // 哪面墙是店面：这栋楼里真有店（地图数据里有店名）或标了商业用途的一定是；没有任何信息的楼，只有临主干道的才可能是店，住宅街上基本都是住家
+    const hs0 = hash(bi * 13 + 5), sy = gh / GROUND_H, shopWall = (I) => gh >= 3.3 && (names || b.k === 's' || (tall && b.k !== 'r') || (!b.k && (I.major ? hs0 < 0.5 : hs0 < 0.03)));
     const fl = h - gh >= 2.4 ? Math.max(1, Math.round((h - gh) / 3.25)) : 0, fh = fl ? (h - gh) / fl : 0;
     const en = pts.map((a, i) => { const c = pts[(i + 1) % n], L = a.distanceTo(c) || 1; return [-(c.y - a.y) / L, (c.x - a.x) / L]; });
     // 每面墙：open = 墙外不是别的楼；sw = 临街时到路缘的距离（不临街为 -1）；det = 离路近，值得开真窗洞
     const info = pts.map((a, i) => {
       const c = pts[(i + 1) % n], mx = (a.x + c.x) / 2, mz = (a.y + c.y) / 2, nx = en[i][0], nz = en[i][1];
-      const open = map.bldDist(mx + nx * 1.0, mz + nz * 1.0, bi, 3) > 0.7; let sw = -1, det = false;
-      if (open) { const l = map.locate(mx, mz, LOC); if (l.seg) { pointAt(l.seg, l.s, PT); if ((PT.x - mx) * nx + (PT.z - mz) * nz > 0.5) { const d = l.d - l.seg.halfW; if (d < 10) sw = d; det = d < 45; } } }
-      return { open, sw, det };
+      const open = map.bldDist(mx + nx * 1.0, mz + nz * 1.0, bi, 3) > 0.7; let sw = -1, det = false, major = false;
+      if (open) { const l = map.locate(mx, mz, LOC); if (l.seg) { pointAt(l.seg, l.s, PT); if ((PT.x - mx) * nx + (PT.z - mz) * nz > 0.5) { const d = l.d - l.seg.halfW; if (d < 10) { sw = d; major = MAJOR.has(l.seg.cls); } det = d < 45; } } }
+      return { open, sw, det, major };
     });
     // 拐角斜接用的单位偏移：mit 总是斜接；off 只沿露在外面的墙往外挑（贴着邻居的一侧齐平）
     const mit = pts.map((a, i) => { const n0 = en[(i + n - 1) % n], n1 = en[i]; let mx = n0[0] + n1[0], mz = n0[1] + n1[1]; const l = Math.hypot(mx, mz); if (l < 0.3) return [n1[0], n1[1]]; mx /= l; mz /= l; const k = 1 / Math.max(0.55, mx * n1[0] + mz * n1[1]); return [mx * k, mz * k]; });
@@ -182,7 +188,11 @@ export function buildBuildings(map, group, occupy, isFree) {
           if (o.y0 > 0.3) Gw.quadN([Wp(o.x0, o.y0, 0), Wp(o.x1, o.y0, 0), Wp(o.x1, o.y0, -d), Wp(o.x0, o.y0, -d)], N4(UPN), cc, uv(o.x0, o.x1, o.y0, o.y0 + d));
         }
       };
-      if (!I.open || L < 2.2) { wq(0, L, 0, h); continue; }
+      /** 一行字：中心 (xc, yc)，最宽 maxW、最高 maxH，贴在墙面外 z 处 */
+      const text = (str, xc, yc, maxW, maxH, z, cc = [1, 1, 1]) => { const t = textInfo(str), asp = t.w / t.hp, th = Math.min(maxH, maxW / asp), tw = th * asp; C.lab.push({ t, p: [Wp(xc - tw / 2, yc - th / 2, z), Wp(xc + tw / 2, yc - th / 2, z), Wp(xc + tw / 2, yc + th / 2, z), Wp(xc - tw / 2, yc + th / 2, z)], n: [nx, 0, nz], c: cc }); return tw; };
+      if (!I.open || L < 2.2 || plain) { wq(0, L, 0, h); continue; }
+      // 有名字的楼（学校、教堂、写字楼……）：临街最先碰到的一面够宽的墙上挂一块深色铭牌
+      if (!nameDone && street && L > 5 && !shopWall(I)) { nameDone = true; { const p = Wp(L / 2, 0, 0); samples.name.push({ x: p[0], z: p[2], nx, nz }); } const t = textInfo(b.n), ph = Math.min(0.62, gh * 0.16), pw2 = Math.min(L - 0.8, ph * 0.7 * t.w / t.hp + 0.5), y0 = tall ? gh - ph - 0.25 : gh + 0.14; rect(C.trim, L / 2 - pw2 / 2, L / 2 + pw2 / 2, y0, y0 + ph, 0.06, lin('#2b2f36')); text(b.n, L / 2, y0 + ph / 2, pw2 - 0.3, ph * 0.7, 0.075); }
       const nb = Math.max(1, Math.floor((L - 0.7) / bayW)), bw = (L - 0.7) / nb, ww = Math.min(wwS, bw - 0.75), bx = (k) => 0.35 + k * bw;
       const winAt = (xc, ys, wh, k) => {      // 一扇窗：近处立体窗 + 退进去的玻璃，远处一张卡片
         const v = Math.floor(hash(bi * 131 + i * 17 + k) * 4);
@@ -202,8 +212,8 @@ export function buildBuildings(map, group, occupy, isFree) {
         if (!fl) band(gh, h, []);
       }
       // ---- 底层：店面 ----
-      if (shop && street) {
-        const sb = Math.max(1, Math.round(L / 3.6)), sw2 = L / sb, pw = K.KIT.pilW / 2, oh = K.KIT.shop[1] * sy, ops = [], ng = Math.max(1, Math.round(sb / 2));
+      if (street && shopWall(I)) {
+        const sb = Math.max(1, Math.round(L / 3.6)), sw2 = L / sb, pw = K.KIT.pilW / 2, oh = K.KIT.shop[1] * sy, ops = [], ng = names ? Math.max(1, Math.min(Math.round(sb / 2), names.length)) : Math.max(1, Math.round(sb / 2));
         const pilCol = tall ? lin('#3a3d42') : mixW(trim, 0.1), gW = tall ? C.stucco : G, gC = tall ? lin('#c9ccce') : col, [gtw, gth] = tall ? TEX_M.stucco : [TW, TH];
         for (let g = 0; g < ng; g++) {
           const k0 = Math.floor(g * sb / ng), k1 = Math.floor((g + 1) * sb / ng), x0 = k0 * sw2, x1 = k1 * sw2, gw = x1 - x0, hs = hash(bi * 53 + i * 7 + g * 3);
@@ -220,7 +230,8 @@ export function buildBuildings(map, group, occupy, isFree) {
           rect(C.trim, s0, s1, sY, sY + sH, 0.012, acc);
           put('signBoard', (s0 + s1) / 2, sY, (s1 - s0) / 2.8, sy, 1, acc);
           const tw2 = Math.min(s1 - s0 - 0.3, sH * 0.74 * 4), th2 = tw2 / 4;
-          rect(C.flat, (s0 + s1) / 2 - tw2 / 2, (s0 + s1) / 2 + tw2 / 2, sY + sH / 2 - th2 / 2, sY + sH / 2 + th2 / 2, 0.118, [1, 1, 1], A.name[nm]);
+          if (names) nName++; if (names) text(names[ni++ % names.length], (s0 + s1) / 2, sY + sH / 2, s1 - s0 - 0.3, sH * 0.74, 0.118);
+          else rect(C.flat, (s0 + s1) / 2 - tw2 / 2, (s0 + s1) / 2 + tw2 / 2, sY + sH / 2 - th2 / 2, sY + sH / 2 + th2 / 2, 0.118, [1, 1, 1], A.name[nm]);
           const nl = Math.max(1, Math.round((s1 - s0) / 1.7)); for (let q = 0; q < nl; q++) put('gooseneck', s0 + (s1 - s0) * (q + 0.5) / nl, sY + sH - 0.02, 1, 1, 1, [1, 1, 1]);
           // 雨棚：挑出多少看人行道有多宽，要给路灯和树留位置
           const out = Math.min(1.15, I.sw - 1.5);
@@ -241,6 +252,7 @@ export function buildBuildings(map, group, occupy, isFree) {
         if (canDoor && k >= d0 && (k - d0) % step === 0) {
           const o = { x0: xc - 0.55, x1: xc + 0.55, y0: st, y1: st + K.KIT.resDoor[1], d: REVEAL }; ops.push(o); solid.push([o.x0 - 0.18, o.x1 + 0.18]);
           put('resDoor', xc, st, 1, 1, 1, doorCol); rect(C.card, o.x0, o.x1, st, o.y1, 0.004, mixW(doorCol, 0.1), A.resDoor);
+          if (!numDone) { numDone = true; nNum++; { const p = Wp(xc, 0, 0.75); samples.num.push({ x: p[0], z: p[2], nx, nz }); } text(b.no, xc, o.y1 - 0.31, 0.9, 0.27, 0.03, lin('#ffe9a8')); }      // 门牌号：写在门上方的亮子上
           if (st > 0.3) { put('stoop', xc, 0, 1, 1, 1, [1, 1, 1]); const p = Wp(xc, 0, 0.75); samples.stoop.push({ x: p[0], z: p[2], nx, nz }); }
         } else if (ww > 0.6 && whG > 0.9 && gh >= 2.6) { const o = hole(winAt(xc, sillY, whG, 900 + k)); if (o) ops.push(o); }
       }
@@ -318,12 +330,21 @@ export function buildBuildings(map, group, occupy, isFree) {
       m.computeBoundingSphere(); m.matrixAutoUpdate = false; m.castShadow = CAST.has(name); m.receiveShadow = !glass; g.add(m);
       if (!ALWAYS.has(name)) hi.push(m);
     }
+    if (C.lab.length) {      // 这一块里所有的字画到一张贴图上：每行 64 像素，一列最多 32 行
+      const strs = [...new Set(C.lab.map(l => l.t.str))], cols = Math.min(8, Math.ceil(strs.length / 32)), rows = Math.ceil(strs.length / cols), cv = document.createElement('canvas'), pos = new Map();
+      cv.width = 512 * cols; cv.height = 64 * rows; const x2 = cv.getContext('2d'); x2.textAlign = 'center'; x2.textBaseline = 'middle'; x2.fillStyle = '#fffaf0';
+      strs.forEach((s, i) => { const x = (i % cols) * 512, y = Math.floor(i / cols) * 64; x2.font = FONT(textInfo(s).px); x2.fillText(s, x + 256, y + 34); pos.set(s, [x, y]); });
+      const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+      const G = new Geo(); for (const l of C.lab) { const [x, y] = pos.get(l.t.str), u0 = (x + 256 - l.t.w / 2) / cv.width, u1 = (x + 256 + l.t.w / 2) / cv.width, v0 = 1 - (y + 33 + l.t.hp / 2) / cv.height, v1 = 1 - (y + 33 - l.t.hp / 2) / cv.height; G.quadN(l.p, N4(l.n), l.c, [[u0, v0], [u1, v0], [u1, v1], [u0, v1]]); }
+      const m = new THREE.Mesh(G.build(), toonMat({ map: tex, vertexColors: true, alphaTest: 0.5 })); m.matrixAutoUpdate = false; m.receiveShadow = true; g.add(m); c.tex = tex; c.texMat = m.material;
+    }
     for (const m of hi) m.visible = false;
     group.add(g); g.updateMatrixWorld(true); c.g = g; c.hi = hi; c.lo = lo; c.built = true; c.near = false;
     return done + 4;
   };
   const dropCell = (c) => {
     group.remove(c.g); c.g.traverse(o => { if (o.isInstancedMesh) o.dispose(); else if (o.isMesh) o.geometry.dispose(); });
+    if (c.tex) { c.tex.dispose(); c.texMat.dispose(); c.tex = c.texMat = null; }
     c.g = c.hi = c.lo = null; c.built = false;
   };
   const distTo = (c, x, z) => Math.hypot(Math.max(c.box[0] - x, 0, x - c.box[2]), Math.max(c.box[1] - z, 0, z - c.box[3]));
@@ -345,5 +366,5 @@ export function buildBuildings(map, group, occupy, isFree) {
       if (cur.built) { cur = null; if (budget > 0) { bd = 1e9; for (const c of cells) if (!c.built) { const d = distTo(c, x, z); if (d < 720 && d < bd) { bd = d; best = c; } } } }
     }
   };
-  return { lod: [], ensure, samples, stats: () => ({ windows: nWin, shopBays: nShop, cells: cells.length, built: cells.filter(c => c.built).length }) };
+  return { lod: [], ensure, samples, stats: () => ({ windows: nWin, shopBays: nShop, numbers: nNum, realNames: nName, cells: cells.length, built: cells.filter(c => c.built).length }) };
 }

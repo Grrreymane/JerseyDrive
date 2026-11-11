@@ -44,26 +44,48 @@ function applyStyle(i, announce) {
 }
 { let saved = null; try { saved = localStorage.getItem('jdStyle2'); } catch { /* 同上 */ } applyStyle(Math.max(0, STYLES.findIndex(x => x.id === (params.get('style') || saved)))); }
 
-// 区域：三张独立的地图，开始界面上选（换区域 = 带着 ?map= 重新打开页面）
-const REGIONS = { downtown: ['Jersey City 市中心', 'data/map.json'], jsq: ['Journal Square', 'data/map_jsq.json'], newark: ['Newark 市中心', 'data/map_newark.json'], all: ['三区连通（大图）', 'data/map_all.json'] };
-let region = params.get('map'); try { region = region || localStorage.getItem('jdRegion'); } catch { /* 存不了就用默认 */ }
-if (!REGIONS[region]) region = 'downtown';
-$('regionList').innerHTML = Object.entries(REGIONS).map(([id, r]) => `<button class="${id === region ? '' : 'ghost'}" data-id="${id}">${r[0]}</button>`).join('');
-for (const b of $('regionList').children) b.onclick = () => { if (b.dataset.id === region) return; try { localStorage.setItem('jdRegion', b.dataset.id); } catch { /* 同上 */ } const u = new URL(location.href); u.searchParams.set('map', b.dataset.id); location.href = u.href; };
+// 出发地点和课程表在地图加载之前就显示出来；加载时点了课程先记下，加载完自动开始
+let ready = false, wantLesson = -1;
+// 地图只有一张连通的大图（JC—JSQ—Newark）；另外三张小图留给测试和调试用（?map=downtown|jsq|newark）
+const MAPS = { all: 'data/map_all.json', downtown: 'data/map.json', jsq: 'data/map_jsq.json', newark: 'data/map_newark.json' };
+const region = MAPS[params.get('map')] ? params.get('map') : 'all';
+// 出发地点：几个现成的街区，或者在大地图上自己选（搜地址 / 点一下 →“从这里出发”）。存的是经纬度，地图范围以后变了也还认得
+const PLACES = [['JC 市中心 · Grove St', 40.7196, -74.0431], ['Paulus Hook', 40.7147, -74.0372], ['Newport', 40.7269, -74.0345], ['Hamilton Park', 40.7275, -74.0447], ['The Heights', 40.7445, -74.0508], ['Journal Square', 40.7323, -74.0630], ['McGinley Square', 40.7252, -74.0690], ['Harrison', 40.7440, -74.1560], ['Newark 市中心', 40.7357, -74.1724], ['Newark · Ironbound', 40.7290, -74.1565]];
+let startAt = null; try { startAt = JSON.parse(localStorage.getItem('jdStartAt')); } catch { /* 存不了就用默认 */ }
+if (!startAt || typeof startAt.lat !== 'number' || typeof startAt.lon !== 'number') startAt = { name: PLACES[0][0], lat: PLACES[0][1], lon: PLACES[0][2] };
+function buildStartList() {
+  const el = $('startList');
+  el.innerHTML = PLACES.map((p, i) => `<button class="${!startAt.custom && p[0] === startAt.name ? '' : 'ghost'}" data-i="${i}">${p[0]}</button>`).join('') + (startAt.custom ? '<button data-i="-1"></button>' : '') + `<button class="ghost" data-i="map"${ready ? '' : ' disabled'}>🗺 在地图上选 / 搜地址…</button>`;
+  for (const b of el.children) {
+    if (b.dataset.i === '-1') { b.textContent = '📍 ' + startAt.name; continue; }
+    b.onclick = () => { if (b.dataset.i === 'map') return toggleBig(true); const p = PLACES[+b.dataset.i]; setStart({ name: p[0], lat: p[1], lon: p[2] }); };
+  }
+  $('btnStart').textContent = ready ? `自由练习 · 从 ${startAt.name} 出发（Enter）` : '地图加载中…';
+}
+function setStart(at) {
+  startAt = at; try { localStorage.setItem('jdStartAt', JSON.stringify(at)); } catch { /* 同上 */ }
+  if (ready) { startPose = poseFor(at); parkSpot = null; restart(); }
+  buildStartList();
+}
 let lesson = null, stars = {};
 try { stars = JSON.parse(localStorage.getItem('jdLessons') || '{}'); } catch { /* 存不了就不记 */ }
-// 区域和课程表在地图加载之前就显示出来；加载时点了课程先记下，加载完自动开始
-let ready = false, wantLesson = -1;
+
 function buildLessonList() {
   $('lessonList').innerHTML = LESSONS.map((l, i) => `<button class="ghost" data-i="${i}"><b>${i + 1}. ${l.title}</b><span>${wantLesson === i ? '加载中…' : '★'.repeat(stars[i] || 0)}</span></button>`).join('');
   for (const b of $('lessonList').children) b.onclick = () => { if (!ready) { wantLesson = +b.dataset.i; buildLessonList(); return; } audio.unlock(); startLesson(+b.dataset.i); };
 }
-buildLessonList();
-$('btnStart').textContent = REGIONS[region][0] + ' 加载中…';
+buildLessonList(); buildStartList();
 await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));      // 先让浏览器把界面画出来，再开始加载（建场景那几秒主线程是占满的）
-const raw = await (await fetch(REGIONS[region][1])).json();
+const raw = await (await fetch(MAPS[region])).json();
 const map = prepareMap(raw);
 const world = buildWorld(map, scene);
+// 水面（浅蓝，透明底），大地图和小地图都用
+let waterImg = null;
+if (world.waterCanvas) {
+  const w = world.waterCanvas, cv = document.createElement('canvas'); cv.width = w.width; cv.height = w.height; const c = cv.getContext('2d'); c.drawImage(w, 0, 0);
+  const d = c.getImageData(0, 0, w.width, w.height), a = d.data; for (let i = 0; i < a.length; i += 4) { const on = a[i] > 127; a[i] = 170; a[i + 1] = 218; a[i + 2] = 255; a[i + 3] = on ? 255 : 0; }
+  c.putImageData(d, 0, 0); waterImg = cv;
+}
 // 导航画面：一张画布，既贴在车里的中控屏上，也给车外视角的圆形小地图用
 const nav = document.createElement('canvas'); nav.width = 640; nav.height = 380;
 const view = buildCarView(scene, renderer, nav);
@@ -75,16 +97,26 @@ const audio = makeAudio();
 
 // ---------- 状态 ----------
 const S = { car: makeCar(), R: makeRules(), t: 0, running: false, paused: true, coach: true, driveTime: 0, startOdo: 0, clean: 0 };
-const HOME = region === 'all' ? [5230, 720] : [0, 0];      // 连通大图的中心在沼泽地里，出发点放在 JC 市中心
-const startPose = (() => {
-  const want = params.get('seg');
-  const seg = (want && map.segs[+want]) || map.segs.filter(s => s.cls === 'residential' && s.oneway && s.useLen > 110 && s.lf === 1 && Math.abs(s.px[0] - HOME[0]) < 350 && Math.abs(s.pz[0] - HOME[1]) < 350)
-    .sort((a, b) => Math.hypot(a.px[0] - HOME[0], a.pz[0] - HOME[1]) - Math.hypot(b.px[0] - HOME[0], b.pz[0] - HOME[1]))[0] || map.segs.find(s => s.useLen > 80);
-  const q = offsetPoint(seg, seg.trimA + 18, laneCenter(seg, true, seg.lf - 1), {});
-  const h = Math.atan2(q.dz, q.dx);
+/** 路上离 (x, z) 最近的位置，车头顺着这条路的行车方向 */
+function poseAt(x, z) {
+  const l = map.locate(x, z, {}); if (!l.seg) return null;
+  const g = l.seg, u = Math.max(g.trimA + 6, Math.min(g.len - g.trimB - 12, l.s)), q = offsetPoint(g, u, laneCenter(g, true, g.lf - 1), {}), h = Math.atan2(q.dz, q.dx);
+  return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h, y: segY(g, u) };
+}
+/** 出发点的位置。现成的街区：在它附近找一条安静的单行小街；自己选的点：就停在那里 */
+function poseFor(at) {
+  const o = raw.origin; let hx = (at.lon - o.lon) * o.kx, hz = -(at.lat - o.lat) * o.kz;
+  if (Math.abs(hx) > map.half.x || Math.abs(hz) > map.half.z) hx = hz = 0;      // 不在这张图里（调试用的小图）
+  const want = params.get('seg'); if (want && map.segs[+want]) { const g = map.segs[+want], q = pointAt(g, g.len / 2, {}); return poseAt(q.x, q.z); }
+  if (at.custom) { const p = poseAt(hx, hz); if (p) return p; }
+  const seg = map.segs.filter(s => s.cls === 'residential' && s.oneway && s.useLen > 110 && s.lf === 1 && !s.high && Math.abs(s.px[0] - hx) < 350 && Math.abs(s.pz[0] - hz) < 350)
+    .sort((a, b) => Math.hypot(a.px[0] - hx, a.pz[0] - hz) - Math.hypot(b.px[0] - hx, b.pz[0] - hz))[0];
+  if (!seg) return poseAt(hx, hz) || poseAt(0, 0);
+  const q = offsetPoint(seg, seg.trimA + 18, laneCenter(seg, true, seg.lf - 1), {}), h = Math.atan2(q.dz, q.dx);
   return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h };
-})();
-function placeCar(p) { Object.assign(S.car, { x: p.x, z: p.z, h: p.h, y: p.y || 0, v: 0, steer: 0 }); clearTransient(S.R); S.R.needReset = null; }
+}
+let startPose = poseFor(startAt);
+function placeCar(p) { const far = ready && Math.hypot(p.x - S.car.x, p.z - S.car.z) > 250; Object.assign(S.car, { x: p.x, z: p.z, h: p.h, y: p.y || 0, v: 0, steer: 0 }); if (far) { world.jump(); world.updateLod(p.x, p.z); } clearTransient(S.R); S.R.needReset = null; }
 // 无违章里程：往前开一米记一米，扣分的违规清零。最长的一段存本地，平台里还会上排行榜
 let bestClean = 0; try { bestClean = +localStorage.getItem('jdBestClean') || 0; } catch { /* 存不了就不记 */ }
 function endClean() {
@@ -111,12 +143,13 @@ let lookHold = 0;
 const keys = new Set(); const inp = { throttle: 0, brake: 0, steer: 0, analog: false }; let padPrev = [];
 const GEAR_KEY = { Digit1: 'P', Digit2: 'R', Digit3: 'N', Digit4: 'D' };
 addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') { if (e.code === 'Escape') e.target.blur(); return; }      // 在搜索框里打字，不当成开车的按键
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
   if (e.repeat) return; keys.add(e.code); audio.unlock();
   if (e.code === 'KeyM' && S.running) return toggleBig();
   if (bigOpen) { if (e.code === 'Escape') toggleBig(); return; }
   if (e.code === 'Escape') return toggleMenu();
-  if (!S.running || S.paused) { if (e.code === 'Enter' && !S.running && !$('btnStart').disabled) start(); return; }
+  if (!S.running || S.paused) { if (e.code === 'Enter' && !S.running && !$('btnStart').disabled && $('lessonDone').classList.contains('hidden')) start(); return; }
   if (e.code === 'KeyQ') setSignal(S.car, -1);
   else if (e.code === 'KeyE') setSignal(S.car, 1);
   else if (e.code === 'KeyF') setSignal(S.car, 2);
@@ -226,6 +259,7 @@ function drawMini() {
   mc.setTransform(1, 0, 0, 1, 0, 0); mc.fillStyle = '#141b26'; mc.fillRect(0, 0, W, H);
   mc.translate(CX, CY); mc.rotate(-Math.PI / 2 - car.h); mc.scale(sc, sc); mc.translate(-car.x, -car.z);
   mc.lineCap = 'round'; mc.lineJoin = 'round';
+  if (waterImg) { const wt = raw.water, i0 = Math.max(0, Math.floor((car.x - range - wt.x0) / wt.cell)), j0 = Math.max(0, Math.floor((car.z - range - wt.z0) / wt.cell)), i1 = Math.min(wt.w, Math.ceil((car.x + range - wt.x0) / wt.cell)), j1 = Math.min(wt.h, Math.ceil((car.z + range - wt.z0) / wt.cell)); if (i1 > i0 && j1 > j0) { mc.globalAlpha = 0.32; mc.drawImage(waterImg, i0, j0, i1 - i0, j1 - j0, wt.x0 + i0 * wt.cell, wt.z0 + j0 * wt.cell, (i1 - i0) * wt.cell, (j1 - j0) * wt.cell); mc.globalAlpha = 1; } }
   for (const s of map.segs) {
     const mx = (s.px[0] + s.px[s.n - 1]) / 2, mz = (s.pz[0] + s.pz[s.n - 1]) / 2;
     if (Math.hypot(mx - car.x, mz - car.z) > range + s.len / 2) continue;
@@ -400,7 +434,7 @@ if (params.has('clay')) {
 world.updateLod(S.car.x, S.car.z); view.update(S.car, 0, 0); sky.update(view.camera, S.car.x, S.car.z); post.render(scene, view.camera);
 // 场景里几千个物体绝大多数不动：关掉每次渲染前的全场景矩阵刷新，会动的（自己的车、镜头、太阳）各自手动刷新
 scene.updateMatrixWorld(true); scene.matrixWorldAutoUpdate = false;
-$('btnStart').disabled = false; $('btnStart').textContent = `自由练习 · ${REGIONS[region][0]}（Enter）`;
+$('btnStart').disabled = false;
 if (params.has('autostart')) start();
 requestAnimationFrame(tick);
 
@@ -453,7 +487,7 @@ if (params.has('spot')) {
   else if (spot === 'aerial') window.__jd.lookFrom(c.x - fx * 38 + rx * 26, 30, c.z - fz * 38 + rz * 26, c.x + fx * 24, 3, c.z + fz * 24);
   else if (world.samples[spot]) {      // 样板：离这个位置最近的第 n 个店面 / 台阶，镜头在正前方偏一点，d 米远
     const s = world.samples[spot].slice().sort((p, q) => Math.hypot(p.x - c.x, p.z - c.z) - Math.hypot(q.x - c.x, q.z - c.z))[+(params.get('n') || 0)], d = +(params.get('d') || 6.5), side = +(params.get('side') || 2.2);
-    window.__jd.lookFrom(s.x + s.nx * d + s.nz * side, +(params.get('eye') || 1.65), s.z + s.nz * d - s.nx * side, s.x, +(params.get('ty') || 1.9), s.z);
+    if (s) window.__jd.lookFrom(s.x + s.nx * d + s.nz * side, +(params.get('eye') || 1.65), s.z + s.nz * d - s.nx * side, s.x, +(params.get('ty') || 1.9), s.z);
   }
   else if (spot === 'cover') { const k = +(params.get('k') || 0); window.__jd.lookFrom(c.x - fx * (6.2 + k) - rx * 2.6, 1.55, c.z - fz * (6.2 + k) - rz * 2.6, c.x + fx * 14 + rx * 1.2, 1.5, c.z + fz * 14 + rz * 1.2); }
   else if (spot === 'car') window.__jd.lookFrom(c.x + fx * 6.6 - rx * 1.5, 1.25, c.z + fz * 6.6 - rz * 1.5, c.x + fx * 1.6, 0.7, c.z + fz * 1.6);
@@ -480,7 +514,7 @@ function lessonSim() {
   if (L.spot) { carCenter(c, PC2); let dh = c.h - L.spot.h; while (dh > Math.PI) dh -= 2 * Math.PI; while (dh < -Math.PI) dh += 2 * Math.PI; if (Math.hypot(PC2.x - L.spot.x, PC2.z - L.spot.z) < 1.25 && Math.abs(dh) < 0.2 && c.gear === 'P') L.x.park = 1; }
 }
 const laneStart = (g, u, fwd = true) => { const q = offsetPoint(g, u, laneCenter(g, fwd, (fwd ? g.lf : g.lb) - 1), {}), h = Math.atan2(q.dz, q.dx) + (fwd ? 0 : Math.PI); return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h, y: segY(g, u) }; };
-const nearest = (pred) => { let best = null, bd = 1e9; for (const g of map.segs) { if (!pred(g)) continue; const d = Math.hypot(g.px[0], g.pz[0]); if (d < bd) { bd = d; best = g; } } return best; };
+const nearest = (pred) => { let best = null, bd = 1e9; for (const g of map.segs) { if (!pred(g)) continue; const d = Math.hypot(g.px[0] - startPose.x, g.pz[0] - startPose.z); if (d < bd) { bd = d; best = g; } } return best; };
 function findStart(kind) {
   if (kind === 'default') return startPose;
   if (kind === 'multi') { const g = nearest(g => g.lf >= 2 && g.useLen > 220 && g.speed <= 35 && !g.high); return g ? laneStart(g, g.trimA + 15) : startPose; }
@@ -497,14 +531,14 @@ function findStart(kind) {
       for (const [id, list] of by) {
         const g = map.segs[id]; if (!g || g.speed > 25 || g.useLen < 70) continue;
         const ss = []; for (const p of list) { map.locate(p.x, p.z, L); if (L.seg === g && L.o > 0) ss.push(L.s); } ss.sort((a, b) => a - b);
-        for (let i = 1; i < ss.length; i++) { const gap = ss[i] - ss[i - 1]; if (gap < 11.5 || gap > 13.5 || ss[i - 1] - g.trimA < 26) continue; const u = (ss[i] + ss[i - 1]) / 2, q = offsetPoint(g, u, g.halfW - 1.15, {}), d = Math.hypot(q.x, q.z); if (d < bd) { bd = d; parkSpot = { x: q.x, z: q.z, h: Math.atan2(q.dz, q.dx), g, u }; } }
+        for (let i = 1; i < ss.length; i++) { const gap = ss[i] - ss[i - 1]; if (gap < 11.5 || gap > 13.5 || ss[i - 1] - g.trimA < 26) continue; const u = (ss[i] + ss[i - 1]) / 2, q = offsetPoint(g, u, g.halfW - 1.15, {}), d = Math.hypot(q.x - startPose.x, q.z - startPose.z); if (d < bd) { bd = d; parkSpot = { x: q.x, z: q.z, h: Math.atan2(q.dz, q.dx), g, u }; } }
       }
     }
     return parkSpot ? laneStart(parkSpot.g, parkSpot.u - 16) : startPose;
   }
   let best = null, bd = 1e9;
   if (kind === 'fast') {
-    for (const s of map.segs) { if (s.speed < 35 || s.useLen < 220) continue; const d = Math.hypot(s.px[0], s.pz[0]); if (d < bd) { bd = d; best = s; } }
+    for (const s of map.segs) { if (s.speed < 35 || s.useLen < 220) continue; const d = Math.hypot(s.px[0] - startPose.x, s.pz[0] - startPose.z); if (d < bd) { bd = d; best = s; } }
     if (!best) return startPose;
     const q = offsetPoint(best, best.trimA + 20, laneCenter(best, true, best.lf - 1), {}), h = Math.atan2(q.dz, q.dx);
     return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h, y: segY(best, best.trimA + 20) };
@@ -513,7 +547,7 @@ function findStart(kind) {
     if (kind === 'allway' ? j.control !== 'allway' : j.control !== 'signal') continue;
     for (const l of j.legs) {
       if (!l.approach || l.segRef.useLen < 90 || l.segRef.speed > 30 || (kind === 'allway' && !l.stop)) continue;
-      const d = Math.hypot(j.cx, j.cz); if (d < bd) { bd = d; best = l; }
+      const d = Math.hypot(j.cx - startPose.x, j.cz - startPose.z); if (d < bd) { bd = d; best = l; }
     }
   }
   if (!best) return startPose;
@@ -550,7 +584,7 @@ function lessonTick() {
   $('btnLdNext').style.display = ok && lesson.i < LESSONS.length - 1 ? '' : 'none';
   show('lessonDone', true); if (ok) audio.good(); else audio.bad();
 }
-ready = true; if (wantLesson >= 0) { const w = wantLesson; wantLesson = -1; startLesson(w); }
+ready = true; buildStartList(); if (wantLesson >= 0) { const w = wantLesson; wantLesson = -1; startLesson(w); }
 $('btnLdNext').onclick = () => startLesson(lesson.i + 1);
 $('btnLdRetry').onclick = () => startLesson(lesson.i);
 $('btnLdFree').onclick = () => { endLesson(); show('lessonDone', false); setPaused(false); };
@@ -559,15 +593,33 @@ $('btnLdMenu').onclick = toMenu; $('btnLessons').onclick = toMenu;
 if (params.has('lesson')) startLesson(Math.max(0, Math.min(LESSONS.length - 1, +params.get('lesson') - 1)));
 
 // ---------- 大地图（M）：上北下南，拖动平移，滚轮缩放 ----------
-let bigOpen = false; const bm = { x: 0, z: 0, s: 1 }, bigCv = $('bigCanvas'), bg = bigCv.getContext('2d');
-function toggleBig() {
+let bigOpen = false, bigMenu = false, pin = null; const bm = { x: 0, z: 0, s: 1 }, bigCv = $('bigCanvas'), bg = bigCv.getContext('2d');
+// 有名字的地方（店、学校、教堂、写字楼……），放大以后标在图上，也能搜
+const POI = []; map.raw.buildings.forEach((b, bi) => { if (!b.nm && !b.n) return; const B = map.buildings[bi]; if (!B || B.skip) return; const x = (B.x0 + B.x1) / 2, z = (B.z0 + B.z1) / 2; for (const nm of b.n ? [b.n, ...(b.nm || [])] : b.nm) POI.push({ x, z, name: nm }); });
+/** fromMenu：从开始界面打开，用来选出发点（这时候还没开车，不涉及暂停） */
+function toggleBig(fromMenu) {
   bigOpen = !bigOpen; $('bigmap').classList.toggle('hidden', !bigOpen);
-  if (bigOpen) { bm.x = S.car.x; bm.z = S.car.z; bm.s = 0.9; setPaused(true); drawBig(); } else if ($('pause').classList.contains('hidden') && $('lessonDone').classList.contains('hidden')) setPaused(false);
+  if (bigOpen) { bigMenu = fromMenu === true; setPin(null); $('bigQ').value = ''; $('bigRes').innerHTML = ''; bm.x = S.car.x; bm.z = S.car.z; bm.s = 0.9; if (!bigMenu) setPaused(true); drawBig(); }
+  else { $('bigQ').blur(); if (!bigMenu && $('pause').classList.contains('hidden') && $('lessonDone').classList.contains('hidden')) setPaused(false); }
 }
+/** 在大地图上选中一个地点：下面出来操作条（导航到这里 / 从这里出发） */
+function setPin(p) {
+  pin = p; show('bigPick', !!p); show('bigHint', !p); if (!p) return;
+  $('pickName').textContent = p.name; show('btnPickNav', !bigMenu);
+}
+function pinAt(x, z) { const l = map.locate(x, z, {}); if (!l.seg || l.d > 80) return setPin(null); const P = pointAt(l.seg, l.s, {}); setPin({ x: P.x, z: P.z, name: shortName(l.seg.name || '无名路') }); }
+$('btnPickNav').onclick = () => { const p = pin; setPin(null); setDest(p.x, p.z); };
+$('btnPickStart').onclick = () => {
+  const p = pin, o = raw.origin; if (!poseAt(p.x, p.z)) return;
+  const menu = bigMenu; toggleBig(); endLesson();
+  setStart({ name: p.name, lat: o.lat - p.z / o.kz, lon: o.lon + p.x / o.kx, custom: true });      // 里面会把车摆过去
+  if (menu) start();
+};
 function drawBig() {
   const pr = Math.min(devicePixelRatio, 2), W = innerWidth, H = innerHeight; if (bigCv.width !== W * pr) { bigCv.width = W * pr; bigCv.height = H * pr; }
   const s = bm.s, c = bg, X = (x) => (x - bm.x) * s + W / 2, Z = (z) => (z - bm.z) * s + H / 2, vis = (x, z, m) => X(x) > -m && X(x) < W + m && Z(z) > -m && Z(z) < H + m;
   c.setTransform(pr, 0, 0, pr, 0, 0); c.fillStyle = '#e8eaed'; c.fillRect(0, 0, W, H); c.lineCap = 'round'; c.lineJoin = 'round';
+  if (waterImg) { const wt = raw.water; c.drawImage(waterImg, X(wt.x0), Z(wt.z0), wt.w * wt.cell * s, wt.h * wt.cell * s); }
   c.fillStyle = '#c3e6c1'; for (const f of map.raw.parks) { c.beginPath(); for (let i = 0; i < f.length; i += 2) c[i ? 'lineTo' : 'moveTo'](X(f[i]), Z(f[i + 1])); c.fill(); }
   if (s > 0.8) { c.fillStyle = '#d8dade'; for (const b of map.buildings) { if (b.skip || !vis((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, 60)) continue; c.beginPath(); for (let i = 0; i < b.n; i++) c[i ? 'lineTo' : 'moveTo'](X(b.pts[2 * i]), Z(b.pts[2 * i + 1])); c.fill(); } }
   const big = (g) => g.cls === 'motorway' || g.cls === 'trunk' || g.cls === 'primary', mid = (g) => g.cls === 'secondary';
@@ -594,12 +646,17 @@ function drawBig() {
     let a = Math.atan2(q.dz, q.dx); if (a > Math.PI / 2 || a < -Math.PI / 2) a += Math.PI;
     c.save(); c.translate(X(q.x), Z(q.z)); c.rotate(a); c.strokeStyle = 'rgba(255,255,255,0.9)'; c.strokeText(shortName(g.name), 0, 0); c.fillStyle = '#3c4043'; c.fillText(shortName(g.name), 0, 0); c.restore();
   }
+  if (s > 1.9) {      // 店名、楼名
+    c.font = '600 11px Arial, sans-serif'; c.lineWidth = 3; const seen = new Set();
+    for (const p of POI) { if (!vis(p.x, p.z, 0)) continue; const k = Math.round(X(p.x) / 90) + ',' + Math.round(Z(p.z) / 22); if (seen.has(k)) continue; seen.add(k); c.strokeStyle = 'rgba(255,255,255,0.9)'; c.strokeText(p.name, X(p.x), Z(p.z)); c.fillStyle = '#8a4b1f'; c.fillText(p.name, X(p.x), Z(p.z)); }
+  }
   if (route) {
     c.strokeStyle = 'rgba(66,133,244,0.9)'; c.lineWidth = 6; c.beginPath();
     for (const r of route.list) { const g = r.seg; c.moveTo(X(g.px[0]), Z(g.pz[0])); for (let i = 1; i < g.n; i++) c.lineTo(X(g.px[i]), Z(g.pz[i])); }
     c.stroke(); const dx = X(route.dest.x), dz = Z(route.dest.z);
     c.fillStyle = '#ea4335'; c.beginPath(); c.arc(dx, dz - 16, 9, 0, 7); c.fill(); c.beginPath(); c.moveTo(dx - 7, dz - 11); c.lineTo(dx + 7, dz - 11); c.lineTo(dx, dz); c.fill(); c.fillStyle = '#fff'; c.beginPath(); c.arc(dx, dz - 16, 3.5, 0, 7); c.fill();
   }
+  if (pin) { const dx = X(pin.x), dz = Z(pin.z); c.fillStyle = '#188038'; c.beginPath(); c.arc(dx, dz - 16, 9, 0, 7); c.fill(); c.beginPath(); c.moveTo(dx - 7, dz - 11); c.lineTo(dx + 7, dz - 11); c.lineTo(dx, dz); c.fill(); c.fillStyle = '#fff'; c.beginPath(); c.arc(dx, dz - 16, 3.5, 0, 7); c.fill(); }
   // 自己的车
   c.save(); c.translate(X(S.car.x), Z(S.car.z)); c.rotate(S.car.h + Math.PI / 2); c.fillStyle = 'rgba(66,133,244,0.22)'; c.beginPath(); c.arc(0, 0, 20, 0, 7); c.fill();
   c.fillStyle = '#4285f4'; c.strokeStyle = '#fff'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(0, -12); c.lineTo(8, 9); c.lineTo(0, 5); c.lineTo(-8, 9); c.closePath(); c.fill(); c.stroke(); c.restore();
@@ -609,12 +666,12 @@ function drawBig() {
 {
   let drag = null; const el = $('bigmap');
   let moved = 0;
-  el.addEventListener('pointerdown', (e) => { if (e.target.id === 'btnNavClear') return; drag = [e.clientX, e.clientY]; moved = 0; el.setPointerCapture(e.pointerId); });
+  el.addEventListener('pointerdown', (e) => { if (e.target !== bigCv) return; $('bigQ').blur(); drag = [e.clientX, e.clientY]; moved = 0; el.setPointerCapture(e.pointerId); });
   el.addEventListener('pointermove', (e) => { if (!drag) return; moved += Math.abs(e.clientX - drag[0]) + Math.abs(e.clientY - drag[1]); bm.x -= (e.clientX - drag[0]) / bm.s; bm.z -= (e.clientY - drag[1]) / bm.s; drag = [e.clientX, e.clientY]; drawBig(); });
-  // 没怎么拖就松手 = 点了一下：把那里设成目的地
-  el.addEventListener('pointerup', (e) => { if (drag && moved < 6) setDest((e.clientX - innerWidth / 2) / bm.s + bm.x, (e.clientY - innerHeight / 2) / bm.s + bm.z); drag = null; });
+  // 没怎么拖就松手 = 点了一下：选中那里
+  el.addEventListener('pointerup', (e) => { if (drag && moved < 6) { pinAt((e.clientX - innerWidth / 2) / bm.s + bm.x, (e.clientY - innerHeight / 2) / bm.s + bm.z); drawBig(); } drag = null; });
   $('btnNavClear').onclick = () => { clearRoute(); drawBig(); };
-  el.addEventListener('wheel', (e) => { e.preventDefault(); const k = Math.exp(-e.deltaY * 0.0015), s1 = Math.max(0.12, Math.min(6, bm.s * k)), dx = e.clientX - innerWidth / 2, dz = e.clientY - innerHeight / 2; bm.x += dx / bm.s - dx / s1; bm.z += dz / bm.s - dz / s1; bm.s = s1; drawBig(); }, { passive: false });
+  el.addEventListener('wheel', (e) => { if (e.target !== bigCv) return; e.preventDefault(); const k = Math.exp(-e.deltaY * 0.0015), s1 = Math.max(0.12, Math.min(6, bm.s * k)), dx = e.clientX - innerWidth / 2, dz = e.clientY - innerHeight / 2; bm.x += dx / bm.s - dx / s1; bm.z += dz / bm.s - dz / s1; bm.s = s1; drawBig(); }, { passive: false });
   addEventListener('resize', () => { if (bigOpen) drawBig(); });
 }
 window.__jd.toggleBig = toggleBig; window.__jd.startLesson = startLesson;
@@ -695,3 +752,39 @@ function navTick() {
   show('navBox', true);
 }
 window.__jd.setDest = setDest; window.__jd.navRoute = () => route;
+
+// ---------- 大地图搜索：街名、门牌 + 街名、店名 / 楼名 ----------
+{
+  const ABBR = { street: 'st', avenue: 'ave', boulevard: 'blvd', drive: 'dr', place: 'pl', road: 'rd', court: 'ct', lane: 'ln', terrace: 'ter', square: 'sq', highway: 'hwy', parkway: 'pkwy', north: 'n', south: 's', east: 'e', west: 'w', saint: 'st', first: '1st', second: '2nd', third: '3rd', fourth: '4th', fifth: '5th', sixth: '6th', seventh: '7th', eighth: '8th', ninth: '9th', tenth: '10th' };
+  const norm = (t) => t.toLowerCase().replace(/[.,']/g, '').split(/\s+/).filter(Boolean).map(w => ABBR[w] || w).join(' ');
+  let streets = null, numbered = null, pois = null;
+  const index = () => {
+    streets = new Map();
+    for (const g of map.segs) { if (!g.name) continue; const k = norm(g.name); let e = streets.get(k); if (!e) streets.set(k, e = { key: k, name: g.name, segs: [], len: 0 }); e.segs.push(g); e.len += g.len; }
+    for (const e of streets.values()) { let cx = 0, cz = 0; for (const g of e.segs) { cx += g.px[g.n >> 1] / e.segs.length; cz += g.pz[g.n >> 1] / e.segs.length; } let bd = 1e9; for (const g of e.segs) { const d = Math.hypot(g.px[g.n >> 1] - cx, g.pz[g.n >> 1] - cz); if (d < bd) { bd = d; e.x = g.px[g.n >> 1]; e.z = g.pz[g.n >> 1]; } } }
+    numbered = new Map(); map.raw.buildings.forEach((b, bi) => { if (!b.no) return; const B = map.buildings[bi]; if (!B) return; const k = b.no.toLowerCase(); (numbered.get(k) || numbered.set(k, []).get(k)).push(B); });
+    pois = POI.map(p => ({ ...p, key: norm(p.name) }));
+  };
+  const search = (text) => {
+    if (!streets) index();
+    const q = norm(text), out = []; if (q.length < 2) return out;
+    const m = q.match(/^(\d+[a-z]?)\s+(.+)$/), sq = m ? m[2] : q, L = {};
+    const hits = [...streets.values()].filter(e => e.key.includes(sq)).sort((a, b) => (a.key.startsWith(sq) ? 0 : 1) - (b.key.startsWith(sq) ? 0 : 1) || b.len - a.len);
+    if (m) for (const B of numbered.get(m[1]) || []) {      // 门牌：这个号码的楼里，挨着这条街的
+      const x = (B.x0 + B.x1) / 2, z = (B.z0 + B.z1) / 2; map.locate(x, z, L); if (!L.seg || !L.seg.name || !norm(L.seg.name).includes(sq)) continue;
+      out.push({ x, z, name: m[1].toUpperCase() + ' ' + shortName(L.seg.name), sub: '门牌', zoom: 3.2 }); if (out.length >= 4) break;
+    }
+    for (const e of hits.slice(0, m && out.length ? 2 : 6)) out.push({ x: e.x, z: e.z, name: shortName(e.name), sub: m && !out.length ? `街道（地图数据里没有 ${m[1]} 号）` : '街道', zoom: 1.6 });
+    for (const p of pois) { if (out.length >= 9) break; if (p.key.includes(q)) out.push({ x: p.x, z: p.z, name: p.name, sub: '地点', zoom: 3.2 }); }
+    return out;
+  };
+  let res = [];
+  const go = (r) => { bm.x = r.x; bm.z = r.z; bm.s = Math.max(bm.s, r.zoom); pinAt(r.x, r.z); if (pin) pin.name = r.name, $('pickName').textContent = r.name; $('bigRes').innerHTML = ''; $('bigQ').blur(); drawBig(); };
+  $('bigQ').addEventListener('input', () => {
+    res = search($('bigQ').value); const el = $('bigRes'); el.innerHTML = '';
+    if (!res.length) { if (norm($('bigQ').value).length >= 2) el.innerHTML = '<i>没找到。试试只输街名（英文），比如 Grove St</i>'; return; }
+    for (const r of res) { const b = document.createElement('button'); b.textContent = r.name; const sm = document.createElement('small'); sm.textContent = r.sub; b.appendChild(sm); b.onclick = () => go(r); el.appendChild(b); }
+  });
+  $('bigQ').addEventListener('keydown', (e) => { if (e.code === 'Enter' && res.length) go(res[0]); });
+  window.__jd.bm = bm; window.__jd.search = search; window.__jd.pin = () => pin; window.__jd.setStart = setStart;
+}

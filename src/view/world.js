@@ -95,6 +95,17 @@ export function buildWorld(map, scene) {
     add(G.build(), toonMat({ map: texConcrete, side: DS, depthFunc: THREE.AlwaysDepth }), -30);
   }
 
+  // ---------- 水面：地图数据里是一张 6 米一格的栅格，画成一张贴图铺在地面上（贴图线性过滤 + 模糊，岸线不会是锯齿） ----------
+  if (map.raw.water) {
+    const wt = map.raw.water, cv = document.createElement('canvas'); cv.width = wt.w; cv.height = wt.h; const c = cv.getContext('2d'); c.fillStyle = '#000'; c.fillRect(0, 0, wt.w, wt.h); c.fillStyle = '#fff';
+    { let k = 0; for (let j = 0; j < wt.h; j++) { let x = 0, on = 0; while (x < wt.w) { const n = wt.rle[k++]; if (on) c.fillRect(x, j, n, 1); x += n; on ^= 1; } if (on) k++; } }
+    const cv2 = document.createElement('canvas'); cv2.width = wt.w; cv2.height = wt.h; const c2 = cv2.getContext('2d'); c2.filter = 'blur(1.1px)'; c2.drawImage(cv, 0, 0);
+    const tex = new THREE.CanvasTexture(cv2); tex.anisotropy = 8; world.waterCanvas = cv;
+    const x0 = wt.x0, z0 = wt.z0, x1 = x0 + wt.w * wt.cell, z1 = z0 + wt.h * wt.cell, g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([x0, CH, z0, x0, CH, z1, x1, CH, z1, x1, CH, z0], 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 1, 1], 2)); g.setIndex([0, 1, 2, 0, 2, 3]);
+    add(g, toonMat({ color: new THREE.Color('#4c82ad'), alphaMap: tex, alphaTest: 0.5, side: DS, depthFunc: THREE.AlwaysDepth, spec: 0.5 }), -29);
+  }
+
   // ---------- 路面 + 路口 + 公园 ----------
   const texAsphalt = canvasTex(256, speckle('#666c78', 0.08, 5000));      // 偏蓝的灰
   const Groad = new ChunkGeo(), Gpark = new ChunkGeo();
@@ -390,6 +401,8 @@ export function buildWorld(map, scene) {
   let first = true;
   /** 每帧调：按距离分块加载 / 卸载建筑 */
   world.stream = (x, z) => bld.ensure(x, z, 3);
+  /** 车被搬到了很远的地方（换出发点、开课）：下一帧把周围的楼一次建齐，不然要等十几秒楼才慢慢长出来 */
+  world.jump = () => { first = true; };
   world.updateLod = (x, z) => {
     if (first) { bld.ensure(x, z, 1e9); first = false; }
     for (const c of chunks) { const on = Math.hypot(c.x - x, c.z - z) < (c.on ? 900 : 860); if (on !== c.on) { c.on = on; c.m.visible = on; } }

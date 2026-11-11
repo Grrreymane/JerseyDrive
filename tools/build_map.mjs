@@ -254,6 +254,19 @@ const hash = (n) => { let x = (n ^ 0x9e3779b9) >>> 0; x = Math.imul(x ^ (x >>> 1
 const polyOf = (w) => { const pts = []; const ids = w.nodes[0] === w.nodes[w.nodes.length - 1] ? w.nodes.slice(0, -1) : w.nodes; for (const id of ids) { const n = nodes.get(id); if (n) pts.push(n.p); } return pts; };
 const areaOf = (pts) => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
 const buildings = [], parks = [];
+// ---- 补充数据（tools/fetch_extra.mjs 下载的）：店铺 / 机构的名字、门牌号、用地类型、水面。没有这个文件就全靠猜 ----
+const XP = path.join(ROOT, 'tools/raw', REGION.raw.replace('.json', '_x.json')), extra = fs.existsSync(XP) ? JSON.parse(fs.readFileSync(XP, 'utf8')).elements : [];
+const inPoly = (pts, x, z) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a[1] > z) !== (b[1] > z) && x < (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+const landuse = extra.filter(e => e.type === 'way' && e.tags && e.tags.landuse && e.geometry).map(e => { const pts = e.geometry.map(g => proj(g.lat, g.lon)); return { k: e.tags.landuse, pts, x0: Math.min(...pts.map(p => p[0])), x1: Math.max(...pts.map(p => p[0])), z0: Math.min(...pts.map(p => p[1])), z1: Math.max(...pts.map(p => p[1])) }; });
+const KIND = {}; for (const [k, list] of Object.entries({
+  r: 'house detached terrace residential apartments dormitory semidetached_house bungalow',
+  i: 'industrial warehouse storage_tank garage garages shed service roof hangar parking ventilation_shaft bridge construction cabin carport',
+  s: 'retail commercial supermarket kiosk',
+  c: 'church school university college hospital train_station civic public government hotel office cathedral chapel mosque synagogue temple kindergarten fire_station',
+})) for (const t of list.split(' ')) KIND[t] = k;
+const SHOPLIKE = new Set('restaurant fast_food cafe bank bar pharmacy pub ice_cream clinic dentist doctors veterinary nightclub cinema theatre car_rental childcare dojo music_school studio arts_centre biergarten events_venue animal_boarding car_wash'.split(' '));
+const CIVIC = new Set('school place_of_worship fire_station police library university college courthouse post_office kindergarten townhall community_centre hospital planetarium social_facility'.split(' '));
+const cleanName = (s) => String(s).replace(/\s+/g, ' ').trim().slice(0, 34);
 for (const w of ways) {
   const t = w.tags || {};
   if (t.building) {
@@ -261,15 +274,92 @@ for (const w of ways) {
     const A = Math.abs(areaOf(pts)); if (A < 10) continue;
     const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length, cz = pts.reduce((s, p) => s + p[1], 0) / pts.length;
     if (Math.abs(cx) > HX + MARGIN || Math.abs(cz) > HZ + MARGIN) continue;
-    let h = parseFloat(t.height) || (parseFloat(t['building:levels']) ? parseFloat(t['building:levels']) * 3.3 + 1.5 : 0);
-    if (!h) { const r = hash(w.id); h = A < 180 ? 9 + r * 5 : A < 700 ? 11 + r * 10 : A < 2500 ? 14 + r * 22 : 18 + r * 40; }
-    buildings.push({ h: r2(h), pts: pts.flatMap(p => [r2(p[0]), r2(p[1])]) });
+    let k = KIND[t.building] || '';
+    if (!k) { const lu = landuse.find(l => cx >= l.x0 && cx <= l.x1 && cz >= l.z0 && cz <= l.z1 && inPoly(l.pts, cx, cz)); if (lu) k = lu.k === 'residential' ? 'r' : lu.k === 'industrial' ? 'i' : 's'; }
+    if (t.amenity && CIVIC.has(t.amenity)) k = 'c';
+    const lv = parseFloat(t['building:levels']), real = parseFloat(t.height) || (lv ? lv * 3.3 + 1.5 : 0);
+    let h = real;
+    if (!h) {      // 没标高度：按类型和占地猜。占地很大又没标的多半是仓库、卖场，不是高楼
+      const r = hash(w.id);
+      h = t.building === 'shed' || t.building === 'garage' || t.building === 'garages' || t.building === 'roof' || t.building === 'carport' ? 3 + r * 1.2
+        : k === 'i' ? 6 + r * 5 : t.building === 'house' || t.building === 'detached' ? 7.5 + r * 2.5
+          : A < 60 ? 4 + r * 4 : A < 180 ? 9 + r * 4 : A < 700 ? 10 + r * 7 : A < 2500 ? 10 + r * 9 : 9 + r * 6;
+    }
+    const b = { h: r2(h), pts: pts.flatMap(p => [r2(p[0]), r2(p[1])]), poly: pts, cx, cz, rr: Math.sqrt(A) };
+    if (k) b.k = k;
+    if (t['addr:housenumber']) b.no = String(t['addr:housenumber']).slice(0, 8);
+    if (t.name) { if (t.shop || SHOPLIKE.has(t.amenity)) b.nm = [cleanName(t.name)]; else b.n = cleanName(t.name); }
+    buildings.push(b);
   } else if (t.leisure === 'park') {
     const pts = polyOf(w); if (pts.length >= 3) parks.push(pts.flatMap(p => [r2(p[0]), r2(p[1])]));
   }
 }
+// 店铺、机构、门牌这些“点”：落在哪栋楼里就归哪栋；不在楼里的归 14 米内最近的楼
+{
+  const CELL = 80, grid = new Map(), key = (x, z) => Math.floor(x / CELL) + ',' + Math.floor(z / CELL);
+  for (const b of buildings) { const k = key(b.cx, b.cz); (grid.get(k) || grid.set(k, []).get(k)).push(b); }
+  const distPoly = (pts, x, z) => { let d = 1e9; for (let i = 0; i < pts.length; i++) { const a = pts[i], c = pts[(i + 1) % pts.length], ex = c[0] - a[0], ez = c[1] - a[1], t = Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / (ex * ex + ez * ez || 1))); d = Math.min(d, Math.hypot(a[0] + ex * t - x, a[1] + ez * t - z)); } return d; };
+  const find = (x, z) => { let best = null, bd = 14; for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) for (const b of grid.get(key(x + i * CELL, z + j * CELL)) || []) { if (Math.hypot(b.cx - x, b.cz - z) > b.rr * 1.6 + 30) continue; const d = inPoly(b.poly, x, z) ? 0 : distPoly(b.poly, x, z); if (d < bd) { bd = d; best = b; } } return best; };
+  let nShop = 0, nCivic = 0, nAddr = 0;
+  for (const e of extra) {
+    if (e.type !== 'node' || !e.tags) continue; const t = e.tags, [x, z] = proj(e.lat, e.lon), b = find(x, z); if (!b) continue;
+    if (t['addr:housenumber'] && !b.no) { b.no = String(t['addr:housenumber']).slice(0, 8); nAddr++; }
+    if (!t.name) continue;
+    if (t.shop || SHOPLIKE.has(t.amenity) || t.craft) { const nm = cleanName(t.name); b.nm = b.nm || []; if (b.nm.length < 5 && !b.nm.includes(nm)) { b.nm.push(nm); nShop++; } }
+    else if (CIVIC.has(t.amenity) || t.tourism === 'hotel' || t.tourism === 'museum') { if (!b.n) { b.n = cleanName(t.name); nCivic++; } }
+  }
+  console.log(`extra: shop names ${nShop}, named places ${nCivic}, house numbers from nodes ${nAddr}; buildings with number ${buildings.filter(b => b.no).length}, with kind ${buildings.filter(b => b.k).length}`);
+  for (const b of buildings) { delete b.poly; delete b.cx; delete b.cz; delete b.rr; }
+}
+// ---- 水面：栅格（每格 6 米）。闭合的水面多边形用奇偶填充；海岸线是不闭合的线（水在行进方向右手边），
+//      先把线画成“墙”，把剩下的格子分成连通块，再让每段海岸线给左右两边的块投票 ----
+let water = null;
+{
+  const CW = 6, PAD = 60, X0 = -HX - PAD, Z0 = -HZ - PAD, W = Math.ceil((2 * HX + 2 * PAD) / CW), H = Math.ceil((2 * HZ + 2 * PAD) / CW), M = new Uint8Array(W * H);
+  const fill = (rings) => {      // 奇偶扫描线
+    let z0 = 1e9, z1 = -1e9; for (const r of rings) for (const p of r) { z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); }
+    for (let j = Math.max(0, Math.floor((z0 - Z0) / CW)); j <= Math.min(H - 1, Math.floor((z1 - Z0) / CW)); j++) {
+      const z = Z0 + (j + 0.5) * CW, xs = [];
+      for (const r of rings) for (let i = 0; i + 1 < r.length; i++) { const a = r[i], b = r[i + 1]; if ((a[1] > z) !== (b[1] > z)) xs.push(a[0] + (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1])); }
+      xs.sort((a, b) => a - b);
+      for (let k = 0; k + 1 < xs.length; k += 2) { const i0 = Math.max(0, Math.ceil((xs[k] - X0) / CW - 0.5)), i1 = Math.min(W - 1, Math.floor((xs[k + 1] - X0) / CW - 0.5)); for (let i = i0; i <= i1; i++) M[j * W + i] = 1; }
+    }
+  };
+  const geo = (g) => g.filter(Boolean).map(p => proj(p.lat, p.lon)); let nPoly = 0;
+  for (const e of extra) {
+    if (!e.tags || e.tags.natural !== 'water') continue;
+    if (e.type === 'way' && e.geometry) { const r = geo(e.geometry); r.push(r[0]); fill([r]); nPoly++; }
+    else if (e.type === 'relation') { fill(e.members.filter(m => m.geometry).map(m => geo(m.geometry))); nPoly++; }
+  }
+  const coast = extra.filter(e => e.type === 'way' && e.tags && e.tags.natural === 'coastline' && e.geometry).map(e => geo(e.geometry));
+  if (coast.length) {
+    const wall = new Uint8Array(W * H), comp = new Int32Array(W * H), cell = (x, z) => { const i = Math.floor((x - X0) / CW), j = Math.floor((z - Z0) / CW); return i < 0 || j < 0 || i >= W || j >= H ? -1 : j * W + i; };
+    for (const r of coast) for (let i = 0; i + 1 < r.length; i++) { const a = r[i], b = r[i + 1], n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (CW * 0.3)) + 1; for (let k = 0; k <= n; k++) { const c = cell(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n); if (c >= 0) wall[c] = 1; } }
+    // 上面的画法是 8 连通的线；把斜着相邻的两格之间补一格，4 连通的填充才钻不过去
+    for (let j = 0; j + 1 < H; j++) for (let i = 0; i + 1 < W; i++) { const a = j * W + i; if (wall[a] === 1 && wall[a + W + 1] === 1 && !wall[a + 1] && !wall[a + W]) wall[a + 1] = 2; if (wall[a + 1] === 1 && wall[a + W] === 1 && !wall[a] && !wall[a + W + 1]) wall[a] = 2; }
+    let nc = 0; const stack = [];
+    for (let s = 0; s < W * H; s++) {
+      if (wall[s] || comp[s]) continue; nc++; comp[s] = nc; stack.push(s);
+      while (stack.length) { const c = stack.pop(), i = c % W; for (const d of [i > 0 ? c - 1 : -1, i < W - 1 ? c + 1 : -1, c - W, c + W]) if (d >= 0 && d < W * H && !wall[d] && !comp[d]) { comp[d] = nc; stack.push(d); } }
+    }
+    const vote = new Float64Array(nc + 1);
+    for (const r of coast) for (let i = 0; i + 1 < r.length; i++) {
+      const a = r[i], b = r[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 1) continue; const rx = -(b[1] - a[1]) / L, rz = (b[0] - a[0]) / L, mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
+      for (const [sgn, off] of [[1, 14], [-1, 14], [1, 26], [-1, 26]]) { const c = cell(mx + rx * off * sgn, mz + rz * off * sgn); if (c >= 0 && comp[c]) vote[comp[c]] += sgn * L; }
+    }
+    for (let c = 0; c < W * H; c++) if (comp[c] && vote[comp[c]] > 0) M[c] = 1;
+    // 海岸线那一格本身：邻居是水就算水，岸线才不会留一圈缝
+    for (let c = 0; c < W * H; c++) if (wall[c] && !M[c]) { const i = c % W; if ((i > 0 && M[c - 1] === 1) || (i < W - 1 && M[c + 1] === 1) || (c >= W && M[c - W] === 1) || (c + W < W * H && M[c + W] === 1)) M[c] = 3; }
+    console.log(`water: ${nPoly} polygons, ${coast.length} coastline ways, ${nc} regions, ${[...vote].filter(v => v > 0).length} of them water`);
+  }
+  let n = 0; const rle = [];
+  for (let j = 0; j < H; j++) { let cur = 0, run = 0; for (let i = 0; i < W; i++) { const v = M[j * W + i] ? 1 : 0; n += v; if (v === cur) run++; else { rle.push(run); cur = v; run = 1; } } rle.push(run); if (cur === 0) rle.push(0); }
+  if (n) water = { cell: CW, w: W, h: H, x0: r2(X0), z0: r2(Z0), rle };      // 每行：陆、水、陆、水……的格数，一行的和 = w
+  console.log(`water cells ${n} (${(n / W / H * 100).toFixed(1)}%)`);
+  if (process.argv.includes('--pgm')) { const buf = Buffer.concat([Buffer.from(`P5\n${W} ${H}\n255\n`), Buffer.from(M.map(v => v ? 255 : 40))]); fs.writeFileSync(path.join(ROOT, 'shots/water.pgm'), buf); }
+}
 
-const out = { version: 1, origin: { lat: LAT0, lon: LON0, kx: KX, kz: KZ }, half: { x: r2(HX), z: r2(HZ) }, segs, juncs: juncOut, buildings, parks };
+const out = { version: 1, origin: { lat: LAT0, lon: LON0, kx: KX, kz: KZ }, half: { x: r2(HX), z: r2(HZ) }, segs, juncs: juncOut, buildings, parks, water };
 fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify(out));
 const cc = {}; for (const j of juncOut) cc[j.control] = (cc[j.control] || 0) + 1;
