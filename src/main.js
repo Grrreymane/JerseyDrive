@@ -410,6 +410,7 @@ if (params.has('spot')) {
     const s = world.samples[spot].slice().sort((p, q) => Math.hypot(p.x - c.x, p.z - c.z) - Math.hypot(q.x - c.x, q.z - c.z))[+(params.get('n') || 0)], d = +(params.get('d') || 6.5), side = +(params.get('side') || 2.2);
     window.__jd.lookFrom(s.x + s.nx * d + s.nz * side, +(params.get('eye') || 1.65), s.z + s.nz * d - s.nx * side, s.x, +(params.get('ty') || 1.9), s.z);
   }
+  else if (spot === 'cover') { const k = +(params.get('k') || 0); window.__jd.lookFrom(c.x - fx * (6.2 + k) - rx * 2.6, 1.55, c.z - fz * (6.2 + k) - rz * 2.6, c.x + fx * 14 + rx * 1.2, 1.5, c.z + fz * 14 + rz * 1.2); }
   else if (spot === 'car') window.__jd.lookFrom(c.x + fx * 6.6 - rx * 1.5, 1.25, c.z + fz * 6.6 - rz * 1.5, c.x + fx * 1.6, 0.7, c.z + fz * 1.6);
 }
 // 跑分 / 录像：?fly（沿固定路线匀速开）、?bench（同上并记录帧时间，结果在 window.__bench）
@@ -541,3 +542,4 @@ window.__jd.toHighway = (ramp) => {
   placeCar({ x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h, y: segY(g, u) }); S.car.gear = 'D'; return g.name;
 };
 if (params.get('spot') === 'highway') { window.__jd.freeze = null; window.__jd.toHighway(params.has('ramp')); $('hud').style.display = ''; }
+if (params.has('nohud')) $('hud').style.visibility = 'hidden';

@@ -1,5 +1,9 @@
 # 泽西城练车（Jersey Drive）
 
+![封面](cover.png)
+
+在线玩：<https://grrreymane.github.io/JerseyDrive/>
+
 在 Jersey City 市中心的真实路网上练车、练交规的网页模拟器。three.js + OpenStreetMap 数据，不用打包。
 
 ## 运行
