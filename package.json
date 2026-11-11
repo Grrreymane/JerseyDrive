@@ -1,0 +1,10 @@
+{
+  "name": "jersey-drive",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "map": "node tools/build_map.mjs",
+    "test": "node tools/test_rules.mjs",
+    "serve": "python -m http.server 8765"
+  }
+}

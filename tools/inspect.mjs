@@ -1,0 +1,28 @@
+import fs from 'fs';
+const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const els = d.elements;
+const nodes = els.filter(e => e.type === 'node'), ways = els.filter(e => e.type === 'way');
+const hw = ways.filter(w => w.tags?.highway), bl = ways.filter(w => w.tags?.building);
+console.log('nodes', nodes.length, 'ways', ways.length, 'highways', hw.length, 'buildings', bl.length);
+const cnt = (arr, f) => { const m = {}; for (const a of arr) { const k = f(a); m[k] = (m[k] || 0) + 1; } return Object.entries(m).sort((a, b) => b[1] - a[1]); };
+console.log('hw class', cnt(hw, w => w.tags.highway));
+console.log('oneway', cnt(hw, w => w.tags.oneway));
+console.log('lanes', cnt(hw, w => w.tags.lanes));
+console.log('maxspeed', cnt(hw, w => w.tags.maxspeed));
+console.log('turn:lanes', cnt(hw, w => w.tags['turn:lanes'] || w.tags['turn:lanes:forward']).slice(0, 12));
+console.log('node hw', cnt(nodes.filter(n => n.tags?.highway), n => n.tags.highway));
+console.log('stop tags', cnt(nodes.filter(n => n.tags?.highway === 'stop'), n => JSON.stringify({ s: n.tags.stop, d: n.tags.direction })));
+console.log('signal tags', cnt(nodes.filter(n => n.tags?.highway === 'traffic_signals'), n => JSON.stringify({ t: n.tags.traffic_signals, d: n.tags['traffic_signals:direction'] })));
+console.log('crossing', cnt(nodes.filter(n => n.tags?.highway === 'crossing'), n => n.tags.crossing + '|' + n.tags['crossing:markings']).slice(0, 8));
+console.log('bld height', bl.filter(b => b.tags.height).length, 'levels', bl.filter(b => b.tags['building:levels']).length);
+console.log('names', [...new Set(hw.map(w => w.tags.name))].length, [...new Set(hw.map(w => w.tags.name))].slice(0, 60).join(', '));
+console.log('other', cnt(ways.filter(w => !w.tags?.highway && !w.tags?.building), w => w.tags?.leisure || w.tags?.natural));
+// node usage among highways
+const use = {}; for (const w of hw) for (const n of w.nodes) use[n] = (use[n] || 0) + 1;
+const sigN = new Set(nodes.filter(n => n.tags?.highway === 'traffic_signals').map(n => n.id));
+const stopN = new Set(nodes.filter(n => n.tags?.highway === 'stop').map(n => n.id));
+let sj = 0, sm = 0; for (const id of sigN) (use[id] > 1 ? sj++ : sm++);
+let tj = 0, tm = 0; for (const id of stopN) (use[id] > 1 ? tj++ : tm++);
+console.log('signals at junction', sj, 'mid-way', sm, '| stops at junction', tj, 'mid-way', tm);
+console.log('junction nodes', Object.values(use).filter(v => v > 1).length);
+console.log('other tags sample', cnt(hw, w => Object.keys(w.tags).filter(k => /parking|cycleway|sidewalk|width|surface|bridge|tunnel|layer/.test(k)).join(',')).slice(0, 15));

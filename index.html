@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>泽西城练车 · Jersey Drive</title>
+<script type="importmap">{ "imports": { "three": "./lib/three.module.min.js" } }</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <div id="street"><span id="streetName">—</span><span id="streetInfo"></span></div>
+    <div id="score"><b id="scoreNum">100</b><span>分</span></div>
+  </div>
+
+  <div id="coach" class="hidden">
+    <div id="coachIcon"></div>
+    <div><div id="coachText"></div><div id="coachSub"></div></div>
+  </div>
+  <div id="preview" class="hidden"></div>
+
+  <div id="toasts"></div>
+
+  <div id="dash">
+    <div id="sigL" class="sig">◀</div>
+    <div id="speedBox"><div id="speed">0</div><div id="unit">mph</div></div>
+    <div id="gears"><span data-g="P">P<i>1</i></span><span data-g="R">R<i>2</i></span><span data-g="N">N<i>3</i></span><span data-g="D">D<i>4</i></span></div>
+    <div id="pedals"><div class="pedal"><b id="pBrake"></b><span>刹车</span></div><div class="pedal"><b id="pGas"></b><span>油门</span></div></div>
+    <div id="limit"><span>SPEED<br>LIMIT</span><b id="limitNum">25</b></div>
+    <div id="sigR" class="sig">▶</div>
+  </div>
+
+  <canvas id="mini" width="220" height="220"></canvas>
+  <div id="keys">W 油门　S 刹车　空格 急刹　A/D 方向　Q/E 转向灯　1–4 挡位　Z/X 左右看　C 视角　V 画风　O 描边　T 教练　G 图鉴　Esc 菜单</div>
+  <div id="attr">地图数据 © OpenStreetMap contributors</div>
+  <div id="flash"></div>
+</div>
+
+<div id="start" class="overlay">
+  <div class="card">
+    <h1>泽西城练车</h1>
+    <p class="lead">Jersey City 市中心的真实街道：单行道、红绿灯、STOP 都按实际位置摆放。现在路上没有别的车，放心慢慢开，教练会在旁边提醒。</p>
+    <div class="cols">
+      <div>
+        <h3>开车</h3>
+        <table>
+          <tr><td><kbd>W</kbd> / <kbd>↑</kbd></td><td>油门（按住 <kbd>Shift</kbd> 踩到底）</td></tr>
+          <tr><td><kbd>S</kbd> / <kbd>↓</kbd></td><td>刹车　<kbd>空格</kbd> 急刹</td></tr>
+          <tr><td><kbd>A</kbd> <kbd>D</kbd> / <kbd>←</kbd> <kbd>→</kbd></td><td>方向盘</td></tr>
+          <tr><td><kbd>Q</kbd> <kbd>E</kbd></td><td>左 / 右转向灯</td></tr>
+          <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></td><td>P / R / N / D 挡</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>观察</h3>
+        <table>
+          <tr><td><kbd>Z</kbd> <kbd>X</kbd></td><td>向左 / 向右看（一起按 = 回头）</td></tr>
+          <tr><td><kbd>C</kbd></td><td>切换视角：车内 / 车后 / 俯视</td></tr>
+          <tr><td><kbd>V</kbd></td><td>切换画风（6 种）　<kbd>O</kbd> 描边开关</td></tr>
+          <tr><td><kbd>T</kbd></td><td>教练提示 开 / 关</td></tr>
+          <tr><td><kbd>G</kbd></td><td>标志图鉴</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>暂停 / 复盘</td></tr>
+        </table>
+      </div>
+    </div>
+    <p class="how"><b>起步：</b>踩住刹车 <kbd>S</kbd> → 按 <kbd>4</kbd> 挂 D 挡 → 松开刹车，车会自己慢慢往前走。也可以接手柄或方向盘。</p>
+    <button id="btnStart" disabled>地图加载中…</button>
+  </div>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <div class="card narrow">
+    <h2>暂停</h2>
+    <button id="btnResume">继续开</button>
+    <button id="btnReport" class="ghost">复盘这次驾驶</button>
+    <button id="btnBook" class="ghost">标志图鉴</button>
+    <button id="btnReset" class="ghost">把车摆回车道</button>
+    <button id="btnRestart" class="ghost">回到起点重新开始</button>
+  </div>
+</div>
+
+<div id="report" class="overlay hidden"><div class="card wide"><h2>驾驶复盘</h2><div id="reportBody"></div><button id="btnReportClose">关闭</button></div></div>
+<div id="book" class="overlay hidden"><div class="card wide"><h2>标志图鉴</h2><div id="bookBody"></div><button id="btnBookClose">关闭</button></div></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
