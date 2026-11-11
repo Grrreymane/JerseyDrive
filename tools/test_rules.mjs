@@ -80,6 +80,20 @@ function findApproach(pred) {
 // ---------- 转弯机器人：沿“进口车道 → 弧线 → 出口车道”的路径开，检查转弯相关的判定 ----------
 // dir: 1 右转 / -1 左转。opts: ctl 路口类型, multi 出口多车道, multiIn 进口多车道, laneIn/laneOut 指定车道,
 //      noSignal 不打灯, sigAt 多远开始打灯, noStop 不停车, red 到达时是红灯, goRed 红灯停稳后照走, skip 跳过前几个候选
+// 选路口时先沿计划的弧线走一遍：路线上不能蹭到路边停的车、不能出路面（地图换了以后，随便挑的路口不一定走得通）
+function clearPath(l, r, dir, opts) {
+  const tx = -l.ox, tz = -l.oz, rtx = l.oz, rtz = -l.ox, inS = l.segRef, inF = l.end === 'b', nIn = inF ? inS.lf : inS.lb, laneIn = opts.laneIn ?? (dir > 0 ? nIn - 1 : 0);
+  const latIn = (inF ? inS.cOff : -inS.cOff) + (laneIn + 0.5) * 3.3, P0 = [l.ex + rtx * latIn, l.ez + rtz * latIn];
+  const oS = r.segRef, oF = r.end === 'a', nOut = oF ? oS.lf : oS.lb, laneOut = opts.laneOut ?? (dir > 0 ? nOut - 1 : 0);
+  const latOut = (oF ? oS.cOff : -oS.cOff) + (laneOut + 0.5) * 3.3, P2 = [r.ex - r.oz * latOut, r.ez + r.ox * latOut];
+  const u = ((P2[0] - P0[0]) * r.oz - (P2[1] - P0[1]) * r.ox) / (tx * r.oz - tz * r.ox); if (!(u > 2 && u < 40)) return false;
+  const P1 = [P0[0] + tx * u, P0[1] + tz * u], pts = [];
+  for (let s = 40; s > 0; s -= 2) pts.push([P0[0] - tx * s, P0[1] - tz * s]);
+  for (let k = 0; k <= 20; k++) { const t = k / 20, a = (1 - t) ** 2, b = 2 * t * (1 - t), c = t * t; pts.push([a * P0[0] + b * P1[0] + c * P2[0], a * P0[1] + b * P1[1] + c * P2[1]]); }
+  for (let s = 2; s < 60; s += 2) pts.push([P2[0] + r.ox * s, P2[1] + r.oz * s]);
+  for (let i = 1; i < pts.length; i++) { const h = Math.atan2(pts[i][1] - pts[i - 1][1], pts[i][0] - pts[i - 1][0]); if (map.hitParked(pts[i][0], pts[i][1], h, 3.0, 1.5) || !map.onRoad(pts[i][0], pts[i][1], -0.6)) return false; }
+  return true;
+}
 function botTurn(dir, opts = {}) {
   let pick = null, skip = opts.skip || 0;
   for (const j of map.juncs) {
@@ -88,7 +102,7 @@ function botTurn(dir, opts = {}) {
       if (!l.approach || l.segRef.useLen < 60) continue;
       if (opts.multiIn && (l.end === 'b' ? l.segRef.lf : l.segRef.lb) < 2) continue;
       const r = j.legs.find(m => m !== l && m.exit && (-l.ox * m.oz + l.oz * m.ox) * dir > 0.9 && m.segRef.useLen > 50 && (!opts.multi || (m.end === 'a' ? m.segRef.lf : m.segRef.lb) >= 2));
-      if (r && skip-- <= 0) { pick = [j, l, r]; break; }
+      if (r && clearPath(l, r, dir, opts) && skip-- <= 0) { pick = [j, l, r]; break; }
     }
     if (pick) break;
   }
@@ -136,7 +150,7 @@ eq(botTurn(1, { noStop: true }), ['stop_sign'], 'STOP 不停直接右转');
 eq(botTurn(-1, { ctl: ['signal'], multi: true }), ['good_turn'], '绿灯左转进最左车道');
 eq(botTurn(-1, { ctl: ['signal'], multi: true, laneOut: 1 }), ['wrong_lane_into'], '左转进了外侧车道');
 eq(botTurn(1, { ctl: ['signal'], red: true, goRed: true }), ['good_ror', 'good_turn'], '红灯停稳后右转');
-eq(botTurn(-1, { ctl: ['signal'], red: true, goRed: true }), ['red_light'], '红灯停稳后左转');
+eq(botTurn(-1, { ctl: ['signal'], red: true, goRed: true, skip: 1 }), ['red_light'], '红灯停稳后左转');
 eq(botTurn(1, { ctl: ['signal'], red: true, noStop: true }), ['red_light'], '红灯不停直接右转');
 eq(botTurn(1, { ctl: ['signal', 'allway', 'stop'], multiIn: true, laneIn: 0 }), ['wrong_lane_from'], '从左车道右转');
 

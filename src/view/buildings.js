@@ -96,26 +96,21 @@ function shopGlassTex() {
  * 生成所有建筑。返回 { lod: [{box, hi, lo}] }，由 world.updateLod 切换远近。
  * occupy(x, z, r)：登记人行道上被占掉的位置（门前台阶），后面种树、立杆时会避开。
  */
-export function buildBuildings(map, group, occupy) {
+export function buildBuildings(map, group, occupy, isFree) {
   const texW = wallTextures(), A = atlasTexture(), bcells = new Map();
-  const cell = (x, z) => {
-    const k = Math.floor(x / BCELL) + ',' + Math.floor(z / BCELL); let c = bcells.get(k);
-    if (!c) bcells.set(k, c = { brick: new Geo(), siding: new Geo(), stucco: new Geo(), glass: new Geo(), trim: new Geo(), core: new Geo(), flat: new Geo(), card: new Geo(), pane: new Geo(), I: {}, box: [1e9, 1e9, -1e9, -1e9] });
-    return c;
-  };
+  const newGeos = () => ({ brick: new Geo(), siding: new Geo(), stucco: new Geo(), glass: new Geo(), trim: new Geo(), core: new Geo(), flat: new Geo(), card: new Geo(), pane: new Geo(), I: {} });
   const inPolyV = (pts, x, z) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a.y > z) !== (b.y > z) && x < (b.x - a.x) * (z - a.y) / (b.y - a.y) + a.x) c = !c; } return c; };
   const LOC = {}, PT = {}; let nWin = 0, nShop = 0;
   const samples = { shop: [], stoop: [], win: [] };      // 出样板截图用：几种立面各记一些位置
 
-  map.raw.buildings.forEach((b, bi) => {
-    if (map.buildings[bi].skip) return;
+  // 一栋楼的全部几何，写进它所在分块 C 的各个 Geo 里
+  const genBuilding = (b, bi, C) => {
     const n = b.pts.length / 2, h = b.h, tall = h > 38, R = (k) => hash(bi * 7 + k);
     const pts = []; let area = 0, cx = 0, cz = 0;
     for (let i = 0; i < n; i++) { pts.push(new THREE.Vector2(b.pts[2 * i], b.pts[2 * i + 1])); cx += b.pts[2 * i] / n; cz += b.pts[2 * i + 1] / n; }
     for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; area += p.x * q.y - q.x * p.y; }
     if (area > 0) pts.reverse();                 // 统一绕向，墙面法线朝外
-    const C = cell(cx, cz), fa = Math.abs(area) / 2, gh = Math.min(GROUND_H, h * 0.6), small = fa < 170 && h < 15;
-    for (const p of pts) { C.box[0] = Math.min(C.box[0], p.x); C.box[1] = Math.min(C.box[1], p.y); C.box[2] = Math.max(C.box[2], p.x); C.box[3] = Math.max(C.box[3], p.y); }
+    const fa = Math.abs(area) / 2, gh = Math.min(GROUND_H, h * 0.6), small = fa < 170 && h < 15;
     // ---- 这栋楼的样式（全部由楼的编号决定，每次打开都一样） ----
     const type = tall ? 'glass' : small ? (R(1) < 0.42 ? 'siding' : R(1) < 0.9 ? 'brick' : 'stucco') : (R(1) < 0.58 ? 'brick' : R(1) < 0.9 ? 'stucco' : 'siding');
     const col = PAL[type][Math.floor(R(2) * PAL[type].length)], G = C[type], [TW, TH] = TEX_M[type];
@@ -238,14 +233,15 @@ export function buildBuildings(map, group, occupy) {
       }
       // ---- 底层：住宅（门 + 台阶 + 窗），不临街的墙只有窗 ----
       if (tall) { const nu = Math.max(1, Math.round(L / 3.4)); rect(C.glass, 0, L, 0, gh, 0, col, [[0, 0], [nu, 0], [nu, 1], [0, 1]]); flush(); continue; }
-      const canDoor = street && L > 4.2 && bw > 1.9 && gh >= 3.0, st = canDoor && I.sw > 2.7 && gh >= 3.5 ? K.KIT.stoopH : 0.06;
+      const canDoor = street && L > 4.2 && bw > 1.9 && gh >= 3.0, stoopOk = (xc) => { const p = Wp(xc, 0, 0.9); return isFree(p[0], p[2], 1.0); }, st0 = canDoor && I.sw > 2.7 && gh >= 3.5 ? K.KIT.stoopH : 0.06;
+      let st = st0; if (st > 0.3) for (let k = 0; k < nb; k++) if (!stoopOk(bx(k) + bw / 2)) { st = 0.06; break; }      // 门口被树或杆子占了：这面墙的门都落地，不做台阶
       const step = Math.max(2, Math.round(9 / bw)), d0 = Math.min(nb - 1, Math.floor(step / 2)), sillY = st > 0.3 ? 1.5 : 1.0, whG = Math.min(nomH * 1.05, gh - sillY - 0.55), ops = [], solid = [];
       for (let k = 0; k < nb; k++) {
         const xc = bx(k) + bw / 2;
         if (canDoor && k >= d0 && (k - d0) % step === 0) {
           const o = { x0: xc - 0.55, x1: xc + 0.55, y0: st, y1: st + K.KIT.resDoor[1], d: REVEAL }; ops.push(o); solid.push([o.x0 - 0.18, o.x1 + 0.18]);
           put('resDoor', xc, st, 1, 1, 1, doorCol); rect(C.card, o.x0, o.x1, st, o.y1, 0.004, mixW(doorCol, 0.1), A.resDoor);
-          if (st > 0.3) { put('stoop', xc, 0, 1, 1, 1, [1, 1, 1]); const p = Wp(xc, 0, 0.75); occupy(p[0], p[2], 1.25); samples.stoop.push({ x: p[0], z: p[2], nx, nz }); }
+          if (st > 0.3) { put('stoop', xc, 0, 1, 1, 1, [1, 1, 1]); const p = Wp(xc, 0, 0.75); samples.stoop.push({ x: p[0], z: p[2], nx, nz }); }
         } else if (ww > 0.6 && whG > 0.9 && gh >= 2.6) { const o = hole(winAt(xc, sillY, whG, 900 + k)); if (o) ops.push(o); }
       }
       band(0, gh, ops); flush();
@@ -283,7 +279,7 @@ export function buildBuildings(map, group, occupy) {
       const cr = Math.cos(rot), sr = Math.sin(rot), m = 0.8;
       if ([[1, 1], [1, -1], [-1, 1], [-1, -1]].every(([p, q]) => inPolyV(pts, cx + (sx / 2 + m) * p * cr - (sz / 2 + m) * q * sr, cz + (sx / 2 + m) * p * sr + (sz / 2 + m) * q * cr))) C.trim.box(cx, h + sy3 / 2, cz, sx, sy3, sz, rot, UNIT, mixW(UNIT, 0.4));
     }
-  });
+  };
 
   // ---------- 建网格 ----------
   const mats = {
@@ -295,21 +291,59 @@ export function buildBuildings(map, group, occupy) {
   };
   const geos = { winA: K.winA(), winB: K.winB(), winC: K.winC(), shopWin0: K.shopWin(0), shopWin1: K.shopWin(1), shopWinGlass: K.shopWinGlass(), shopDoor: K.shopDoor(), shopDoorGlass: K.shopDoorGlass(), pilaster: K.pilaster(), awningS: K.awning(true), awningP: K.awning(false), signBoard: K.signBoard(), gooseneck: K.gooseneck(), bladeSign: K.bladeSign(), resDoor: K.resDoor(), stoop: K.stoop() };
   const ALWAYS = new Set(['awningS', 'awningP']), CAST = new Set(['awningS', 'awningP', 'stoop', 'pilaster', 'signBoard', 'bladeSign']);
-  const lod = [];
-  for (const c of bcells.values()) {
-    const mesh = (k, mat, cast = true) => { if (!c[k].i.length) return null; const g = c[k].build(); g.computeBoundingSphere(); const m = new THREE.Mesh(g, mat); m.matrixAutoUpdate = false; m.castShadow = cast; m.receiveShadow = true; group.add(m); return m; };
+  // ---------- 分块：只建玩家周围的，走远了卸掉。整张地图一次建完要好几个 G 内存 ----------
+  for (let bi = 0; bi < map.raw.buildings.length; bi++) {
+    if (map.buildings[bi].skip) continue;
+    const B = map.buildings[bi], cx = (B.x0 + B.x1) / 2, cz = (B.z0 + B.z1) / 2, k = Math.floor(cx / BCELL) + ',' + Math.floor(cz / BCELL);
+    let c = bcells.get(k); if (!c) bcells.set(k, c = { list: [], box: [1e9, 1e9, -1e9, -1e9], built: false, near: null, g: null, hi: null, lo: null });
+    c.list.push(bi); c.box[0] = Math.min(c.box[0], B.x0); c.box[1] = Math.min(c.box[1], B.z0); c.box[2] = Math.max(c.box[2], B.x1); c.box[3] = Math.max(c.box[3], B.z1);
+  }
+  const cells = [...bcells.values()];
+  // 一块分几帧建：每次只生成几栋楼，全部生成完再合成网格，免得开着开着顿一下
+  const buildCell = (c, n) => {
+    if (!c.pend) c.pend = { C: newGeos(), i: 0 };
+    const C = c.pend.C; let done = 0;
+    while (c.pend.i < c.list.length && done < n) { const bi = c.list[c.pend.i++]; genBuilding(map.raw.buildings[bi], bi, C); done++; }
+    if (c.pend.i < c.list.length) return done;
+    const g = new THREE.Group(), hi = [], lo = []; c.pend = null;
+    const mesh = (k, mat, cast = true) => { if (!C[k].i.length) return null; const m = new THREE.Mesh(C[k].build(), mat); m.matrixAutoUpdate = false; m.castShadow = cast; m.receiveShadow = true; g.add(m); return m; };
     for (const k of ['brick', 'siding', 'stucco', 'glass', 'trim']) mesh(k, mats[k]);
     mesh('flat', mats.atlas, false);
     { const m = mesh('core', mats.core); if (m) m.receiveShadow = false; }
-    const hi = [], lo = [], card = mesh('card', mats.atlas, false), pane = mesh('pane', mats.pane, false);
+    const card = mesh('card', mats.atlas, false), pane = mesh('pane', mats.pane, false);
     if (card) lo.push(card); if (pane) hi.push(pane);
-    for (const [name, Q] of Object.entries(c.I)) {
+    for (const [name, Q] of Object.entries(C.I)) {
       const glass = name.endsWith('Glass'), m = new THREE.InstancedMesh(geos[name], glass ? mats.shopGlass : mats.kit, Q.c.length / 3);
       m.instanceMatrix.array.set(Q.m); m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Q.c), 3);
-      m.computeBoundingSphere(); m.matrixAutoUpdate = false; m.castShadow = CAST.has(name); m.receiveShadow = !glass; group.add(m);
+      m.computeBoundingSphere(); m.matrixAutoUpdate = false; m.castShadow = CAST.has(name); m.receiveShadow = !glass; g.add(m);
       if (!ALWAYS.has(name)) hi.push(m);
     }
-    lod.push({ box: c.box, hi, lo, near: null });
-  }
-  return { lod, samples, stats: { windows: nWin, shopBays: nShop, cells: bcells.size } };
+    for (const m of hi) m.visible = false;
+    group.add(g); c.g = g; c.hi = hi; c.lo = lo; c.built = true; c.near = false;
+    return done + 4;
+  };
+  const dropCell = (c) => {
+    group.remove(c.g); c.g.traverse(o => { if (o.isInstancedMesh) o.dispose(); else if (o.isMesh) o.geometry.dispose(); });
+    c.g = c.hi = c.lo = null; c.built = false;
+  };
+  const distTo = (c, x, z) => Math.hypot(Math.max(c.box[0] - x, 0, x - c.box[2]), Math.max(c.box[1] - z, 0, z - c.box[3]));
+  /** 每帧调一次。budget = 这一帧最多生成几栋楼（开局传大数，一次建齐眼前的） */
+  let cur = null;
+  const ensure = (x, z, budget = 3) => {
+    let best = null, bd = 1e9;
+    for (const c of cells) {
+      const d = distTo(c, x, z);
+      if (!c.built) { if (d < 720 && d < bd) { bd = d; best = c; } continue; }
+      if (d > 860) { dropCell(c); continue; }
+      const near = d < (c.near ? 125 : 110);
+      if (near !== c.near) { c.near = near; for (const m of c.hi) m.visible = near; for (const m of c.lo) m.visible = !near; }
+    }
+    if (cur && (cur.built || distTo(cur, x, z) > 800)) { if (!cur.built) cur.pend = null; cur = null; }
+    while (budget > 0) {
+      if (!cur) { cur = best; best = null; if (!cur) break; }
+      budget -= buildCell(cur, budget);
+      if (cur.built) { cur = null; if (budget > 0) { bd = 1e9; for (const c of cells) if (!c.built) { const d = distTo(c, x, z); if (d < 720 && d < bd) { bd = d; best = c; } } } }
+    }
+  };
+  return { lod: [], ensure, samples, stats: () => ({ windows: nWin, shopBays: nShop, cells: cells.length, built: cells.filter(c => c.built).length }) };
 }

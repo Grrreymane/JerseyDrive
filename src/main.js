@@ -304,6 +304,7 @@ function tick(now) {
   audio.engine(S.running && !S.paused ? S.car : null);
   if (S.running) { updateHud(); if (frame % 3 === 0) drawMini(); }
   if (frame % 6 === 0) world.updateLod(S.car.x, S.car.z);
+  world.stream(S.car.x, S.car.z);
   sky.update(view.camera, S.car.x, S.car.z);
   if (trafficOn) actors.update(T);
   view.renderMirrors(); post.render(scene, view.camera);

@@ -140,13 +140,17 @@ export class Geo {
       for (let k = 1; k < seg - 1; k++) this.quadN([R[0], R[k], R[k + 1], R[k + 1]], [nn, nn, nn, nn], col);
     }
   }
-  build() {
+  build(keep = false) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.c, 3));
     g.setIndex(this.p.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(this.i, 1) : new THREE.Uint16BufferAttribute(this.i, 1));
+    // 包围球现在就算好，然后数据一传进显卡就把内存里的副本丢掉：整张地图的几何加起来有几个 G，留着没用
+    g.computeBoundingSphere(); g.computeBoundingBox();
+    if (!keep) for (const a of [...Object.values(g.attributes), g.index]) a.onUpload(function () { this.array = null; });
+    this.p = this.n = this.uv = this.c = this.i = null;
     return g;
   }
   get tris() { return this.i.length / 3; }

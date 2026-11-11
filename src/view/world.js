@@ -187,7 +187,7 @@ export function buildWorld(map, scene) {
   const occ = [], occupy = (x, z, r) => occ.push(x, z, r);
   const isFree = (x, z, r) => { for (let i = 0; i < occ.length; i += 3) if (Math.hypot(occ[i] - x, occ[i + 1] - z) < occ[i + 2] + r) return false; return true; };
   const inPolyV = (pts, x, z) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a.y > z) !== (b.y > z) && x < (b.x - a.x) * (z - a.y) / (b.y - a.y) + a.x) c = !c; } return c; };
-  const bld = buildBuildings(map, raised, occupy);
+  const bld = buildBuildings(map, raised, occupy, (x, z, r) => isFree(x, z, r));
 
   // ---------- 标志 / 红绿灯 / 路名牌 ----------
   const atlas = makeSignAtlas(256);
@@ -296,18 +296,27 @@ export function buildWorld(map, scene) {
   };
 
   // ---------- 分块 + 远近两套模型 ----------
-  const CELLSZ = 120; world.lod = [...bld.lod];
+  const CELLSZ = 120; world.lod = [];
   const cellsOf = (items) => { const m = new Map(); for (const it of items) { const k = Math.floor(it.x / CELLSZ) + ',' + Math.floor(it.z / CELLSZ); let a = m.get(k); if (!a) m.set(k, a = []); a.push(it); } return [...m.values()]; };
   const inst = (list, geo, mat, fill, parent = raised) => {
     const m = new THREE.InstancedMesh(geo, mat, list.length); list.forEach((it, i) => fill(m, it, i));
     m.computeBoundingSphere(); m.castShadow = m.receiveShadow = true; parent.add(m); return m;
   };
-  const addLod = (list, hi, lo, r = 145, far = 1e9) => { let x = 0, z = 0; for (const it of list) { x += it.x; z += it.z; } world.lod.push({ x: x / list.length, z: z / list.length, hi, lo, near: null, r, far }); };      // r 以内画精模，far 以外连简模也不画
+  // 每块的精模 / 简模放进同一个组：超出 far 就把整组关掉（关掉的组渲染时不用逐个遍历里面的东西）
+  const addLod = (list, hi, lo, r = 145, far = 700) => {
+    let x = 0, z = 0; for (const it of list) { x += it.x; z += it.z; }
+    const g = new THREE.Group(), all = [...hi, ...lo]; if (all.length) { all[0].parent.add(g); for (const m of all) g.add(m); }
+    world.lod.push({ x: x / list.length, z: z / list.length, hi, lo, near: null, gone: null, r, far, g });
+  };
+  let first = true;
+  /** 每帧调：按距离分块加载 / 卸载建筑 */
+  world.stream = (x, z) => bld.ensure(x, z, 3);
   world.updateLod = (x, z) => {
+    if (first) { bld.ensure(x, z, 1e9); first = false; }
     for (const c of world.lod) {
-      // 建筑按包围盒算距离（保证 110 米内一定是精细的），其余按中心点
-      const b = c.box, d = b ? Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - z, 0, z - b[3])) : Math.hypot(c.x - x, c.z - z), near = b ? d < (c.near ? 125 : 110) : d < (c.near ? c.r + 20 : c.r), gone = !b && d > c.far;
-      if (near !== c.near || gone !== c.gone) { c.near = near; c.gone = gone; for (const m of c.hi) m.visible = near; for (const m of c.lo) m.visible = !near && !gone; }
+      const d = Math.hypot(c.x - x, c.z - z), near = d < (c.near ? c.r + 20 : c.r), gone = d > (c.gone ? c.far - 30 : c.far);
+      if (gone !== c.gone) { c.gone = gone; c.g.visible = !gone; }
+      if (near !== c.near) { c.near = near; for (const m of c.hi) m.visible = near; for (const m of c.lo) m.visible = !near; }
     }
   };
 
@@ -321,7 +330,7 @@ export function buildWorld(map, scene) {
     for (const list of cellsOf(map.parked)) {
       const sed = list.filter(p => !isSuv(p)), suv = list.filter(isSuv), hi = [];
       if (sed.length) hi.push(inst(sed, gSedan, paint, put, R)); if (suv.length) hi.push(inst(suv, gSuv, paint, put, R));
-      addLod(list, hi, [inst(list, gLow, paint, put, R)], 120, 700);
+      addLod(list, hi, [inst(list, gLow, paint, put, R)], 120, 620);
     }
     S1.set(1, 1, 1);
   }
@@ -394,6 +403,6 @@ export function buildWorld(map, scene) {
 
   world.samples = bld.samples;
   world.updateLod(0, 0);
-  world.stats = { lamps: lampAt.length, parked: map.parked.length, buildings: map.raw.buildings.length, ...bld.stats };
+  world.stats = () => ({ lamps: lampAt.length, parked: map.parked.length, buildings: map.raw.buildings.length, ...bld.stats() });
   return world;
 }

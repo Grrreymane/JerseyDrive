@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/raw/osm.json'), 'utf8'));
 
-const BBOX = { s: 40.7140, w: -74.0520, n: 40.7300, e: -74.0340 };
+const BBOX = { s: 40.7080, w: -74.0680, n: 40.7370, e: -74.0300 };
 const LAT0 = (BBOX.s + BBOX.n) / 2, LON0 = (BBOX.w + BBOX.e) / 2;
 const KX = 111320 * Math.cos(LAT0 * Math.PI / 180), KZ = 110574;
 const proj = (lat, lon) => [(lon - LON0) * KX, -(lat - LAT0) * KZ];
@@ -24,7 +24,7 @@ for (const e of raw.elements) {
   else if (e.type === 'way') ways.push(e);
 }
 
-const DRIVE = new Set(['primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link', 'residential', 'unclassified', 'living_street']);
+const DRIVE = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link', 'residential', 'unclassified', 'living_street']);
 const r2 = (v) => Math.round(v * 100) / 100;
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
@@ -180,7 +180,7 @@ for (const j of juncs) {
   }
   j.sig = false; j.stopAll = false;
 }
-const RANK = { primary: 4, secondary: 3, tertiary: 2, residential: 1, unclassified: 1, living_street: 1 };
+const RANK = { motorway: 6, trunk: 5, primary: 4, secondary: 3, tertiary: 2, residential: 1, unclassified: 1, living_street: 1 };
 let nSig = 0, nStopTagged = 0, nStopInferred = 0, nJoint = 0;
 for (const j of juncs) {
   const app = j.legs.filter(approachable);

@@ -6,7 +6,7 @@ const SHADOW_MAP = 4096;
 
 export function buildSky(scene, renderer) {
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap; renderer.shadowMap.autoUpdate = false;
-  scene.background = new THREE.Color('#d6ecfb'); scene.fog = new THREE.Fog('#d6ecfb', 260, 1500);
+  scene.background = new THREE.Color('#d6ecfb'); scene.fog = new THREE.Fog('#d6ecfb', 220, 720);
   const amb = new THREE.HemisphereLight(0xffffff, 0xffffff, Math.PI); scene.add(amb);
   const sun = new THREE.DirectionalLight(0xffffff, Math.PI);
   sun.castShadow = true; sun.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);

@@ -1,10 +1,10 @@
 [out:json][timeout:120];
 (
-  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street)$"](40.7140,-74.0520,40.7300,-74.0340);
-  node["highway"~"^(traffic_signals|stop|crossing|give_way)$"](40.7140,-74.0520,40.7300,-74.0340);
-  way["building"](40.7140,-74.0520,40.7300,-74.0340);
-  way["leisure"="park"](40.7140,-74.0520,40.7300,-74.0340);
-  way["natural"="water"](40.7140,-74.0520,40.7300,-74.0340);
-  way["natural"="coastline"](40.7140,-74.0520,40.7300,-74.0340);
+  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street)$"](40.7080,-74.0680,40.7370,-74.0300);
+  node["highway"~"^(traffic_signals|stop|crossing|give_way)$"](40.7080,-74.0680,40.7370,-74.0300);
+  way["building"](40.7080,-74.0680,40.7370,-74.0300);
+  way["leisure"="park"](40.7080,-74.0680,40.7370,-74.0300);
+  way["natural"="water"](40.7080,-74.0680,40.7370,-74.0300);
+  way["natural"="coastline"](40.7080,-74.0680,40.7370,-74.0300);
 );
 out body; >; out skel qt;
