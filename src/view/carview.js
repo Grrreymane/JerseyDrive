@@ -12,7 +12,8 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
 // 朝向驾驶员、往后仰 tilt 弧度的平面的朝向：本地 x = 车右，y = 面的上方，z = 指向驾驶员
 const facing = (tilt) => new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(V(0, 0, 1), V(Math.sin(tilt), Math.cos(tilt), 0), V(-Math.cos(tilt), Math.sin(tilt), 0)));
 
-export function buildCarView(scene, renderer) {
+export function buildCarView(scene, renderer, navCanvas) {
+  const view0 = {};
   const root = new THREE.Group(); scene.add(root);
   const BODY = [0.16, 0.42, 0.85], DASH_TOP = [0.04, 0.043, 0.052], DASH = [0.21, 0.23, 0.28], DASH_LOW = [0.5, 0.47, 0.42], TRIM = [0.09, 0.1, 0.13], SEAT = [0.36, 0.32, 0.28], LINER = [0.66, 0.64, 0.6], CHROME = [0.7, 0.72, 0.76], BLACK = [0.03, 0.03, 0.04];
   const L1 = (o) => { o.layers.set(1); o.frustumCulled = false; root.add(o); return o; };
@@ -158,22 +159,17 @@ export function buildCarView(scene, renderer) {
     arrow(206, -1, blink && (car.signal === -1 || car.signal === 2)); arrow(306, 1, blink && (car.signal === 1 || car.signal === 2));
     clusterTex.needsUpdate = true;
   };
-  // 中控屏：一张静态的小地图
+  // 中控屏：实时导航（画面是 main.js 里的小地图画布）
   {
-    const c = document.createElement('canvas'); c.width = 256; c.height = 144; const g = c.getContext('2d');
-    g.fillStyle = '#122033'; g.fillRect(0, 0, 256, 144); g.strokeStyle = '#2c4460'; g.lineWidth = 6;
-    for (let i = 0; i < 5; i++) { g.beginPath(); g.moveTo(i * 60 - 10, 0); g.lineTo(i * 60 + 30, 144); g.stroke(); g.beginPath(); g.moveTo(0, i * 36 + 8); g.lineTo(256, i * 36 - 8); g.stroke(); }
-    g.strokeStyle = '#4da3ff'; g.lineWidth = 5; g.lineJoin = 'round'; g.beginPath(); g.moveTo(128, 140); g.lineTo(140, 86); g.lineTo(208, 78); g.lineTo(214, 20); g.stroke();
-    g.fillStyle = '#fff'; g.beginPath(); g.moveTo(128, 122); g.lineTo(137, 142); g.lineTo(119, 142); g.fill();
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-    const q = facing(0.1), W = 0.3, H = 0.165, r = 0.016, sh = new THREE.Shape();
+    const t = new THREE.CanvasTexture(navCanvas); t.colorSpace = THREE.SRGBColorSpace; view0.navTex = t;
+    const q = facing(0.1), W = 0.38, H = 0.225, r = 0.018, sh = new THREE.Shape();
     sh.moveTo(-W / 2 + r, -H / 2); sh.lineTo(W / 2 - r, -H / 2); sh.quadraticCurveTo(W / 2, -H / 2, W / 2, -H / 2 + r); sh.lineTo(W / 2, H / 2 - r); sh.quadraticCurveTo(W / 2, H / 2, W / 2 - r, H / 2);
     sh.lineTo(-W / 2 + r, H / 2); sh.quadraticCurveTo(-W / 2, H / 2, -W / 2, H / 2 - r); sh.lineTo(-W / 2, -H / 2 + r); sh.quadraticCurveTo(-W / 2, -H / 2, -W / 2 + r, -H / 2);
     const bezel = L1(new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 0.012, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.003, bevelSegments: 2, curveSegments: 5 }), toonMat({ color: new THREE.Color().setRGB(0.045, 0.05, 0.06), spec: 0.6, smooth: true })));
-    bezel.position.set(1.9, 1.02, 0.14); bezel.quaternion.copy(q);
+    bezel.position.set(1.9, 1.035, 0.18); bezel.quaternion.copy(q);
     const scr = L1(new THREE.Mesh(new THREE.PlaneGeometry(W - 0.022, H - 0.022), new THREE.MeshBasicMaterial({ map: t, fog: false })));
-    scr.position.set(1.9, 1.02, 0.14).add(V(0, 0, 0.0158).applyQuaternion(q)); scr.quaternion.copy(q);
-    const GF = new Geo(); GF.aabb(1.9, 0.975, 0.08, 1.925, 1.03, 0.2, [0.1, 0.105, 0.12]); L1(new THREE.Mesh(GF.build(), toonMat({ vertexColors: true })));
+    scr.position.set(1.9, 1.035, 0.18).add(V(0, 0, 0.0158).applyQuaternion(q)); scr.quaternion.copy(q);
+    const GF = new Geo(); GF.aabb(1.9, 0.975, 0.11, 1.925, 1.03, 0.25, [0.05, 0.053, 0.062]); L1(new THREE.Mesh(GF.build(), toonMat({ vertexColors: true })));
   }
 
   // ---------- 方向盘 ----------
@@ -244,7 +240,7 @@ export function buildCarView(scene, renderer) {
 
   const camera = new THREE.PerspectiveCamera(58, 16 / 9, 0.08, 1800);
   scene.add(camera);
-  const view = { root, camera, mirrors, mode: 'cockpit', look: 0, frame: 0 };
+  const view = { root, camera, mirrors, mode: 'cockpit', look: 0, frame: 0, navTex: view0.navTex };
   const tgt = new THREE.Vector3();
 
   /** lookTarget：视线偏转角（弧度，右为正） */

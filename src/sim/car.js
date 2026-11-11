@@ -40,14 +40,16 @@ export function stepCar(car, inp, dt) {
   car.h += car.v / CAR.wheelbase * Math.tan(car.steer * MAX_STEER) * dt;
   car.x += car.v * Math.cos(car.h) * dt; car.z += car.v * Math.sin(car.h) * dt;
   car.odo += Math.abs(car.v) * dt;
-  // 转向灯：方向盘往打灯方向转过、再回正后自动熄灭
+  // 转向灯：车头确实朝打灯方向转过了一个弯（45° 以上）、方向盘再回正，才自动熄灭。
+  // 只看方向盘的话，进弯前随手修一下方向灯就灭了，接着会被判“转弯没打灯”
   if (car.signal === 1 || car.signal === -1) {
-    if (car.steer * car.signal > 0.22) car.sigTurned = true;
-    else if (car.sigTurned && Math.abs(car.steer) < 0.06) { car.signal = 0; car.sigTurned = false; }
-  } else car.sigTurned = false;
+    if (car.sigH === undefined || car.sigH === null) car.sigH = car.h;
+    if ((car.h - car.sigH) * car.signal > 0.78) car.sigTurned = true;
+    if (car.sigTurned && Math.abs(car.steer) < 0.06) { car.signal = 0; car.sigTurned = false; car.sigH = null; }
+  } else { car.sigTurned = false; car.sigH = null; }
 }
 
-export function setSignal(car, s) { car.signal = car.signal === s ? 0 : s; car.sigTurned = false; }
+export function setSignal(car, s) { car.signal = car.signal === s ? 0 : s; car.sigTurned = false; car.sigH = null; }
 
 /** 换挡。返回 null 表示成功，否则返回原因代号 */
 export function shift(car, g) {

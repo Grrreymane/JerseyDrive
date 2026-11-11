@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { prepareMap, signalState, laneCenter, offsetPoint, pointAt, CAR } from './sim/map.js';
-import { makeCar, stepCar, setSignal, shift, MPH, GEARS } from './sim/car.js';
+import { makeCar, stepCar, setSignal, shift, carCenter, MPH, GEARS } from './sim/car.js';
+import { makeTraffic, stepTraffic } from './sim/traffic.js';
+import { buildActors } from './view/actors.js';
 import { makeRules, stepRules, clearTransient, PENALTY } from './sim/rules.js';
 import { buildWorld } from './view/world.js';
 import { buildSky } from './view/sky.js';
@@ -8,7 +10,7 @@ import { buildPost } from './view/post.js';
 import { STYLES, setRamp, toonU } from './view/toon.js';
 import { buildCarView } from './view/carview.js';
 import { signDataURL, shortName } from './view/signs.js';
-import { EVENT_TEXT, EVENT_SHORT, hintText, SIGN_BOOK, SHIFT_MSG } from './rulebook.js';
+import { EVENT_TEXT, EVENT_SHORT, hintText, ALERT_TEXT, SIGN_BOOK, SHIFT_MSG } from './rulebook.js';
 import { makeAudio } from './view/audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -38,7 +40,13 @@ function applyStyle(i, announce) {
 const raw = await (await fetch('data/map.json')).json();
 const map = prepareMap(raw);
 const world = buildWorld(map, scene);
-const view = buildCarView(scene, renderer);
+// 导航画面：一张画布，既贴在车里的中控屏上，也给车外视角的圆形小地图用
+const nav = document.createElement('canvas'); nav.width = 640; nav.height = 380;
+const view = buildCarView(scene, renderer, nav);
+const actors = buildActors(scene);
+// 车流和行人（地址加 ?empty 关掉，空城练习）
+const trafficOn = !params.has('empty') && !(params.has('spot') && !params.has('traffic')) && !params.has('bench');
+let T = makeTraffic(map);
 const audio = makeAudio();
 
 // ---------- 状态 ----------
@@ -52,7 +60,7 @@ const startPose = (() => {
   return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h };
 })();
 function placeCar(p) { Object.assign(S.car, { x: p.x, z: p.z, h: p.h, v: 0, steer: 0 }); clearTransient(S.R); S.R.needReset = null; }
-function restart() { S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; placeCar(startPose); $('toasts').innerHTML = ''; }
+function restart() { S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; T = makeTraffic(map); placeCar(startPose); $('toasts').innerHTML = ''; }
 restart();
 
 // ---------- 输入 ----------
@@ -147,7 +155,7 @@ function updateHud() {
   audio.blinker(car.signal !== 0 && S.running && !S.paused, blink);
 
   // 教练提示
-  let h = S.coach ? hintText(R.hint) : null;
+  let h = S.coach ? (R.alert && Math.abs(car.v) + 1 > 0 ? ALERT_TEXT[R.alert] : null) || hintText(R.hint) : null;
   if (S.coach && !h && car.gear === 'P' && S.driveTime < 600) h = { icon: 'info', text: '踩住刹车（S），按 4 挂 D 挡，再慢慢松开刹车', sub: '自动挡松开刹车就会自己往前走（蠕行），先感受一下车速' };
   set('coachOn', !!h, (v) => el.coach.classList.toggle('hidden', !v));
   if (h) {
@@ -164,16 +172,16 @@ function updateHud() {
 }
 
 // 小地图（车头朝上）
-const mini = $('mini'), mc = mini.getContext('2d');
+const mini = $('mini'), miniC = mini.getContext('2d'), mc = nav.getContext('2d');
 function drawMini() {
-  const car = S.car, W = mini.width, sc = 0.6, range = W / 2 / sc + 30;
-  mc.setTransform(1, 0, 0, 1, 0, 0); mc.clearRect(0, 0, W, W);
-  mc.translate(W / 2, W * 0.62); mc.rotate(-Math.PI / 2 - car.h); mc.scale(sc, sc); mc.translate(-car.x, -car.z);
+  const car = S.car, W = nav.width, H = nav.height, sc = 1.15, range = W / 2 / sc + 40, CX = W / 2, CY = H * 0.7;
+  mc.setTransform(1, 0, 0, 1, 0, 0); mc.fillStyle = '#141b26'; mc.fillRect(0, 0, W, H);
+  mc.translate(CX, CY); mc.rotate(-Math.PI / 2 - car.h); mc.scale(sc, sc); mc.translate(-car.x, -car.z);
   mc.lineCap = 'round'; mc.lineJoin = 'round';
   for (const s of map.segs) {
     const mx = (s.px[0] + s.px[s.n - 1]) / 2, mz = (s.pz[0] + s.pz[s.n - 1]) / 2;
     if (Math.hypot(mx - car.x, mz - car.z) > range + s.len / 2) continue;
-    mc.strokeStyle = S.R.cur?.seg === s ? '#8f96a3' : '#565b64'; mc.lineWidth = Math.max(5, s.halfW * 2);
+    mc.strokeStyle = S.R.cur?.seg === s ? '#9aa3b2' : s.cls === 'motorway' ? '#6a7f9e' : '#566070'; mc.lineWidth = Math.max(5, s.halfW * 2);
     mc.beginPath(); mc.moveTo(s.px[0], s.pz[0]); for (let i = 1; i < s.n; i++) mc.lineTo(s.px[i], s.pz[i]); mc.stroke();
     if (s.oneway && s.len > 30) {   // 单行道方向箭头
       const q = offsetPoint(s, s.len / 2, 0, {}), a = Math.atan2(q.dz, q.dx);
@@ -187,8 +195,20 @@ function drawMini() {
       mc.fillStyle = '#16181c'; mc.fillRect(j.cx - 5, j.cz - 5, 10, 10); mc.fillStyle = st === 'G' ? '#2ee06a' : st === 'Y' ? '#ffc21a' : '#ff3b30'; mc.beginPath(); mc.arc(j.cx, j.cz, 3.6, 0, 7); mc.fill();
     } else { mc.fillStyle = '#d0121f'; mc.beginPath(); for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; mc[i ? 'lineTo' : 'moveTo'](j.cx + Math.cos(a) * 5, j.cz + Math.sin(a) * 5); } mc.fill(); }
   }
-  mc.setTransform(1, 0, 0, 1, W / 2, W * 0.62); mc.fillStyle = '#4da3ff'; mc.strokeStyle = '#fff'; mc.lineWidth = 2;
-  mc.beginPath(); mc.moveTo(0, -10); mc.lineTo(7, 8); mc.lineTo(0, 4); mc.lineTo(-7, 8); mc.closePath(); mc.fill(); mc.stroke();
+  if (trafficOn) {      // 别的车（黄点）和正在过马路的人（白点）
+    mc.fillStyle = '#ffd24a'; for (const o of T.cars) { mc.beginPath(); mc.arc(o.x, o.z, 2.6, 0, 7); mc.fill(); }
+    mc.fillStyle = '#ffffff'; for (const o of T.peds) if (o.onRoad) { mc.beginPath(); mc.arc(o.x, o.z, 1.8, 0, 7); mc.fill(); }
+  }
+  mc.setTransform(1, 0, 0, 1, CX, CY); mc.fillStyle = '#4da3ff'; mc.strokeStyle = '#fff'; mc.lineWidth = 3;
+  mc.beginPath(); mc.moveTo(0, -16); mc.lineTo(11, 13); mc.lineTo(0, 6); mc.lineTo(-11, 13); mc.closePath(); mc.fill(); mc.stroke();
+  // 屏幕顶上一条：路名 + 限速
+  mc.setTransform(1, 0, 0, 1, 0, 0); mc.fillStyle = 'rgba(10,14,20,0.82)'; mc.fillRect(0, 0, W, 46);
+  mc.fillStyle = '#e8edf3'; mc.font = '600 24px Arial, sans-serif'; mc.textBaseline = 'middle'; mc.textAlign = 'left'; mc.fillText(S.R.cur ? shortName(S.R.cur.street || '') : '', 16, 24);
+  mc.textAlign = 'right'; mc.fillStyle = '#9fb0c4'; mc.fillText('限速 ' + (S.R.cur?.seg.speed || 25) + ' mph', W - 16, 24);
+  view.navTex.needsUpdate = true;
+  // 车外视角没有中控屏：把同一张图裁成圆形小地图显示在右下角
+  const show = view.mode !== 'cockpit'; if (mini.style.display !== (show ? '' : 'none')) mini.style.display = show ? '' : 'none';
+  if (show) { miniC.clearRect(0, 0, mini.width, mini.height); miniC.drawImage(nav, CX - 150, CY - 190, 300, 300, 0, 0, mini.width, mini.height); }
 }
 
 // ---------- 菜单 / 复盘 / 图鉴 ----------
@@ -238,19 +258,24 @@ function openBook() {
 function resize() { const w = innerWidth, h = innerHeight, pr = renderer.getPixelRatio(); renderer.setSize(w, h, false); view.resize(w, h); post.setSize(Math.round(w * pr), Math.round(h * pr)); post.setStyle(STYLES[styleIdx]); }
 addEventListener('resize', resize); resize();
 
+const PC = {};
+function stepActors(dt) { const c = S.car, A = S.R.A; carCenter(c, PC); stepTraffic(T, { x: PC.x, z: PC.z, h: c.h, v: c.v, cur: S.R.cur, stopT: A && A.stopped ? A.stopT : -1 }, S.t, dt); }
 function simStep(lookT) {
-  stepCar(S.car, inp, DT); stepRules(S.R, S.car, map, S.t, DT); S.t += DT; S.driveTime += DT;
+  stepCar(S.car, inp, DT);
+  if (trafficOn) stepActors(DT);
+  stepRules(S.R, S.car, map, S.t, DT, trafficOn ? T : null); S.t += DT; S.driveTime += DT;
   showEvents();
   if (S.R.needReset) {
-    const flip = S.R.needReset.flip, c = S.car;
-    const p = map.snapToLane(c.x + Math.cos(c.h) * CAR.center, c.z + Math.sin(c.h) * CAR.center, c.h + (flip ? Math.PI : 0)) || startPose;
+    const flip = S.R.needReset.flip, c = S.car, back = S.R.needReset.back ? 9 : 0;      // 撞了车或人：退回去 9 米，并把贴得太近的车清掉
+    const p = map.snapToLane(c.x + Math.cos(c.h) * (CAR.center - back), c.z + Math.sin(c.h) * (CAR.center - back), c.h + (flip ? Math.PI : 0)) || startPose;
+    if (back) T.cars = T.cars.filter(o => Math.hypot(o.x - p.x, o.z - p.z) > 16);
     placeCar(p); const f = $('flash'); f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on')));
   }
 }
 let prev = performance.now(), acc = 0, frame = 0, lookT = 0;
 // 固定路线飞行（跑分 / 录像用）：车按固定速度沿折线走，不跑物理和规则
 function flyStep(dt) {
-  const F = S.fly, c = S.car; F.d = Math.min(F.len, F.d + F.v * dt); S.t += dt;
+  const F = S.fly, c = S.car; F.d = Math.min(F.len, F.d + F.v * dt); S.t += dt; if (trafficOn) { S.R.cur = null; stepActors(Math.min(dt, 0.05)); }
   let i = 1; while (i < F.pts.length - 1 && F.pts[i].d < F.d) i++;
   const a = F.pts[i - 1], b = F.pts[i], t = (F.d - a.d) / (b.d - a.d || 1), h = Math.atan2(b.z - a.z, b.x - a.x);
   let dh = h - c.h; while (dh > Math.PI) dh -= 2 * Math.PI; while (dh < -Math.PI) dh += 2 * Math.PI; c.h += dh * Math.min(1, dt * 4 + 0.02);
@@ -280,6 +305,7 @@ function tick(now) {
   if (S.running) { updateHud(); if (frame % 3 === 0) drawMini(); }
   if (frame % 6 === 0) world.updateLod(S.car.x, S.car.z);
   sky.update(view.camera, S.car.x, S.car.z);
+  if (trafficOn) actors.update(T);
   view.renderMirrors(); post.render(scene, view.camera);
   frame++; requestAnimationFrame(tick);
 }

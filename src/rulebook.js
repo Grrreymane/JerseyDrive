@@ -16,6 +16,13 @@ export const EVENT_TEXT = {
   wrong_lane_from: (e) => ({ title: e.turn === 'through' ? '从转弯专用道直行了' : (e.turn === 'left' ? '左转' : '右转') + '的起始车道不对', body: '左转从最左边的车道（靠中线）出发，右转从最右边的车道出发。地上画了箭头的，按箭头走。要换道得在进路口之前换好。' }),
   wrong_lane_into: (e) => ({ title: (e.turn === 'left' ? '左转' : '右转') + '后进错了车道', body: e.turn === 'left' ? '左转要转进目标道路最靠左（最靠中线）的那条车道。转完、走直了，再打灯变道。' : '右转要贴着路缘，转进目标道路最右边的那条车道，不要甩到外侧车道。' }),
   lane_no_signal: (e) => ({ title: '变道没打转向灯', body: '变道前：看后视镜 → 打灯 → 回头看盲区 → 再变道。' }),
+  no_yield: (e) => e.why === 'oncoming' ? { title: '左转没有让对向直行的车', body: '绿灯（没有左转箭头）时左转是“让行左转”：对向直行和右转的车先走。车头可以先进路口等，等对向有足够大的空当再转。' }
+    : e.why === 'first' ? { title: '抢了先到的车', body: '全向停车（ALL WAY）按到达顺序走：谁先停稳谁先走；同时到，让右手边的车。对方先停下了，就等它过去。' }
+    : e.why === 'inJ' ? { title: '路口里还有车就开进去了', body: '停稳之后先看路口里面：已经在路口里的车有路权，等它开出去再走。' }
+    : { title: '没有让横向来车', body: '你这边有 STOP（或红灯右转），横向的车不用停。停稳后往左、往右、再往左看，来车离得近就等它过去。' },
+  no_yield_ped: () => ({ title: '没有礼让斑马线上的行人', body: '新泽西州：行人在斑马线上时，车必须停下并保持停住，等人走过你这半边路。转弯时尤其要先看要开进去的那条路的斑马线。' }),
+  hit_ped: () => ({ title: '撞到行人', body: '最严重的事故。接近路口和斑马线时脚先移到刹车上，车速降到随时能停下来。' }),
+  hit_car: () => ({ title: '撞到别的车', body: '和前车保持至少 3 秒车距；进路口前确认横向和对向的车离得够远。' }),
   crash: () => ({ title: '碰到了路边停着的车', body: '窄路上和停着的车至少留出一个车门的宽度（约 1 米）。眼睛看远处的路中间，不要盯着旁边的车。' }),
   off_road: () => ({ title: '开上了人行道', body: '转弯时车速要降到 10 mph 左右，方向打得晚了就会冲出去。已帮你把车摆回车道。' }),
   map_edge: () => ({ title: '到地图边界了', body: '已帮你掉头。' }),
@@ -25,11 +32,19 @@ export const EVENT_TEXT = {
 };
 export const EVENT_SHORT = {
   red_light: '闯红灯', stop_sign: 'STOP 没停', rolling_stop: 'STOP 没停稳', over_line: '越过停止线', wrong_way: '单行道逆行', wrong_side: '压到对向车道', speeding: '超速',
+  no_yield: '没让有路权的车', no_yield_ped: '没礼让行人', hit_ped: '撞到行人', hit_car: '撞到别的车',
   no_signal: '转弯没打灯', late_signal: '打灯太晚', wrong_lane_from: '转弯起始车道不对', wrong_lane_into: '转弯后进错车道', lane_no_signal: '变道没打灯', crash: '碰撞', off_road: '开上人行道',
   good_stop: 'STOP 完全停稳', good_ror: '红灯右转正确', good_turn: '转弯规范',
 };
 
 /** 教练提示（接近路口时） */
+/** 该让谁（比路口提示优先） */
+export const ALERT_TEXT = {
+  ped: { icon: 'info', text: '前方斑马线有行人：停车，等人走过去', sub: '人在斑马线上或者正要踏上来，车都要停；停在斑马线前面，不要压上去' },
+  car: { icon: 'info', text: '有车比你有路权：等它先走', sub: '你有 STOP、对方没有，就等对方过去；全向停车时谁先停稳谁先走' },
+  inJ: { icon: 'info', text: '路口里有车：等它开出去', sub: '已经在路口里的车先走' },
+  oncoming: { icon: 'info', text: '左转要让对向直行的车', sub: '可以先把车头开进路口、摆正方向盘等着，对向没车了再转' },
+};
 export function hintText(h) {
   if (!h) return null;
   const near = h.d < 30;

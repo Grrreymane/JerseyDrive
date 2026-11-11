@@ -67,34 +67,10 @@ export function toonMat(o = {}) {
  */
 export const STYLES = [
   {
-    id: 'city', name: '都市', desc: '不描边 · 柔和三段明暗 · 天光补光 · 接触阴影',
-    ramp: [[-1, 0], [-0.2, 0.42], [0.22, 1]], soft: 0.2, lit: [1.0, 0.95, 0.86], shade: [0.4, 0.44, 0.58], sunDir: [-0.52, 0.8, 0.44],
-    line: { w: 1.5, ink: [0.09, 0.085, 0.17], k: 0.85, crease: 1 }, sat: 1.06, contrast: 1.05, halftone: 0, spec: 0.8, rim: 0.12, rimColor: [1, 0.97, 0.9], ao: 2.6,
-    sky: ['#3f86de', '#8cc3f0', '#dbe9f3'], cloud: ['#ffffff', '#cddbea'],
-  },
-  {
     id: 'cel', name: '赛璐璐', desc: '两段硬明暗 · 蓝紫色阴影 · 细墨线',
     ramp: [[-1, 0], [0.08, 1]], soft: 0, lit: [1.05, 1.0, 0.93], shade: [0.55, 0.59, 0.8], sunDir: [-0.52, 0.8, 0.44],
     line: { w: 1.5, ink: [0.09, 0.085, 0.17], k: 0.85, crease: 1 }, sat: 1.1, contrast: 1.05, halftone: 0, spec: 1, rim: 0.35, rimColor: [1, 1, 1],
     sky: ['#2f7fe6', '#7fc0f5', '#d6ecfb'], cloud: ['#ffffff', '#c4dcf3'],
-  },
-  {
-    id: 'soft', name: '柔和动画', desc: '三段柔明暗 · 暖色调 · 淡棕色线',
-    ramp: [[-1, 0], [-0.1, 0.5], [0.35, 1]], soft: 0.12, lit: [1.06, 1.0, 0.9], shade: [0.66, 0.66, 0.78], sunDir: [-0.6, 0.7, 0.3],
-    line: { w: 1.4, ink: [0.36, 0.22, 0.16], k: 0.7, crease: 0.7 }, sat: 1.05, contrast: 1.0, halftone: 0, spec: 0.5, rim: 0.2, rimColor: [1, 0.95, 0.8],
-    sky: ['#5fa8e8', '#a9d6f2', '#f3eede'], cloud: ['#fffdf5', '#e6dcc8'],
-  },
-  {
-    id: 'comic', name: '美漫', desc: '粗黑描边 · 高饱和 · 暗部网点',
-    ramp: [[-1, 0], [0.1, 1]], soft: 0, lit: [1.05, 1.02, 0.96], shade: [0.42, 0.44, 0.7], sunDir: [-0.52, 0.8, 0.44],
-    line: { w: 2.3, ink: [0.02, 0.02, 0.05], k: 1, crease: 1 }, sat: 1.35, contrast: 1.16, halftone: 0.55, spec: 1.2, rim: 0, rimColor: [1, 1, 1],
-    sky: ['#1f6fe0', '#62b2f5', '#cfe9ff'], cloud: ['#ffffff', '#b9d4f0'],
-  },
-  {
-    id: 'dusk', name: '黄昏', desc: '低角度暖光 · 长影子 · 紫色暗部',
-    ramp: [[-1, 0], [0.05, 1]], soft: 0, lit: [1.18, 0.9, 0.66], shade: [0.42, 0.36, 0.7], sunDir: [-0.78, 0.36, 0.5],
-    line: { w: 1.7, ink: [0.16, 0.07, 0.2], k: 0.88, crease: 1 }, sat: 1.18, contrast: 1.08, halftone: 0, spec: 1.1, rim: 0.6, rimColor: [1, 0.72, 0.4],
-    sky: ['#4a5fc9', '#f08a6a', '#ffd9a0'], cloud: ['#ffd6bd', '#c98aa8'],
   },
   {
     id: 'flat', name: '干净无描边', desc: '两段明暗 · 不描线 · 最接近原来的清爽感',
