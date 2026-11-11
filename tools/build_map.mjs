@@ -49,7 +49,7 @@ function attrs(t) {
   if (turnB.length !== lb) turnB = [];
   return { name: t.name || '', cls, oneway, lf, lb, speed, speedTagged: !!t.maxspeed, park, turnF, turnB };
 }
-const keyOf = (a) => [a.name, a.cls, a.oneway, a.lf, a.lb, a.speed, a.turnF.join('/'), a.turnB.join('/')].join('|');
+const keyOf = (a) => [a.tun ? 'T' : '', a.name, a.cls, a.oneway, a.lf, a.lb, a.speed, a.turnF.join('/'), a.turnB.join('/')].join('|');
 
 // ---------- 2. 取出可开的路，按范围裁剪，在共用节点处切段 ----------
 const runs = [];
@@ -58,7 +58,9 @@ for (const w of ways) {
   if (!DRIVE.has(t.highway)) continue;
   // 高架：只收高速 / 快速路的桥（收费公路支线、匝道）；别的桥和所有隧道先不做
   const high = t.bridge && t.bridge !== 'no' && /^(motorway|trunk)/.test(t.highway);
-  if (t.tunnel === 'yes' || (!high && (t.bridge === 'yes' || (t.layer && t.layer !== '0')))) continue;
+  // 隧道：同样只收高速 / 快速路的（荷兰隧道引道、NJ 139 下层）
+  const low = t.tunnel && t.tunnel !== 'no' && /^(motorway|trunk|primary)/.test(t.highway);
+  if ((t.tunnel === 'yes' && !low) || (!high && !low && (t.bridge === 'yes' || (t.layer && t.layer !== '0')))) continue;
   if (t.access === 'private' || t.access === 'no') continue;
   const a = attrs(t);
   let ids = w.nodes.slice();
@@ -67,19 +69,23 @@ for (const w of ways) {
   for (const id of ids) {
     const n = nodes.get(id);
     if (n && inBounds(n.p)) cur.push(id);
-    else { if (cur.length > 1) runs.push({ a, ids: cur, high }); cur = []; }
+    else { if (cur.length > 1) runs.push({ a, ids: cur, high, low }); cur = []; }
   }
-  if (cur.length > 1) runs.push({ a, ids: cur, high });
+  if (cur.length > 1) runs.push({ a, ids: cur, high, low });
 }
 // 节点高度：只属于高架路的节点先定在桥面高度，和地面路共用的节点是 0；再沿路把坡度压到 5.5% 以内，匝道自然就成了斜坡
 const DECK = 7.5, GRADE = 0.055, H = new Map();
-for (const r of runs) for (const id of r.ids) H.set(id, r.high ? (H.has(id) ? H.get(id) : DECK) : 0);
-for (const r of runs) if (!r.high) for (const id of r.ids) H.set(id, 0);
+const DEEP = -6.5;
+for (const r of runs) for (const id of r.ids) if (!H.has(id)) H.set(id, r.high ? DECK : r.low ? DEEP : 0);
+for (const r of runs) if (!r.high && !r.low) for (const id of r.ids) H.set(id, 0);
+// 隧道的坡度约束：|高度差| 不超过 距离 × 坡度（和高架同一个式子，对负的高度一样成立）
 for (let pass = 0; pass < 400; pass++) {
   let ch = false;
   for (const r of runs) for (let i = 1; i < r.ids.length; i++) {
     const a = r.ids[i - 1], b = r.ids[i], d = dist(nodes.get(a).p, nodes.get(b).p) * GRADE;
-    if (H.get(a) > H.get(b) + d + 1e-6) { H.set(a, H.get(b) + d); ch = true; } else if (H.get(b) > H.get(a) + d + 1e-6) { H.set(b, H.get(a) + d); ch = true; }
+    const ha = H.get(a), hb = H.get(b);
+    if (ha > hb + d + 1e-6) { if (ha > 0) H.set(a, hb + d); else H.set(b, ha - d); ch = true; }
+    else if (hb > ha + d + 1e-6) { if (hb > 0) H.set(b, ha + d); else H.set(a, hb - d); ch = true; }
   }
   if (!ch) break;
 }
@@ -95,6 +101,7 @@ for (const r of runs) {
   }
   pieces.push({ ...structuredClone(r.a), ids: cur, alive: true });
 }
+{ const lowIds = new Set(); for (const r of runs) if (r.low) for (const id of r.ids) lowIds.add(id); for (const p of pieces) if (p.ids.every(id => lowIds.has(id))) p.tun = true; }
 const pieceLen = (p) => { let L = 0; for (let i = 1; i < p.ids.length; i++) L += dist(nodes.get(p.ids[i - 1]).p, nodes.get(p.ids[i]).p); return L; };
 
 // ---------- 3. 合并同属性的首尾相接路段 ----------
@@ -201,7 +208,7 @@ for (const j of juncs) {
   if (!j.real) { j.control = 'joint'; nJoint++; for (const l of j.legs) l.stop = false; continue; }
   // 高速 / 快速路之间的分流、合流，以及高架上的路口：没有灯也没有 STOP
   j.y = [...j.members].reduce((a, id) => a + (H.get(id) || 0), 0) / j.members.size;
-  if (j.y > 1.5 || j.legs.every(l => RANK[l.p.cls] >= 5)) { j.control = 'none'; for (const l of j.legs) l.stop = false; continue; }
+  if (Math.abs(j.y) > 1.5 || j.legs.every(l => RANK[l.p.cls] >= 5)) { j.control = 'none'; for (const l of j.legs) l.stop = false; continue; }
   if (j.sig) {
     j.control = 'signal'; nSig++;
     // 按方向分两组相位：以等级最高的那条路为主轴
@@ -232,7 +239,7 @@ const segs = pieces.map(p => {
   const pts = [], ys = []; let last = null;
   for (const id of p.ids) { const q = nodes.get(id).p; if (last && dist(last, q) < 0.3) continue; pts.push(r2(q[0]), r2(q[1])); ys.push(r2(H.get(id) || 0)); last = q; }
   const ja = juncOfNode.get(p.ids[0]), jb = juncOfNode.get(p.ids[p.ids.length - 1]);
-  return { id: p.sid, name: p.name, cls: p.cls, oneway: p.oneway, lf: p.lf, lb: p.lb, speed: p.speed, speedTagged: p.speedTagged, park: p.park, turnF: p.turnF, turnB: p.turnB, a: ja ? ja.id : -1, b: jb ? jb.id : -1, pts, ...(ys.some(v => v > 0.05) ? { ys } : {}) };
+  return { id: p.sid, name: p.name, cls: p.cls, oneway: p.oneway, lf: p.lf, lb: p.lb, speed: p.speed, speedTagged: p.speedTagged, park: p.park, turnF: p.turnF, turnB: p.turnB, a: ja ? ja.id : -1, b: jb ? jb.id : -1, pts, ...(ys.some(v => Math.abs(v) > 0.05) ? { ys } : {}), ...(p.tun ? { tun: 1 } : {}) };
 });
 const juncOut = juncs.map(j => ({
   id: j.id, x: r2(j.x), z: r2(j.z), y: r2([...j.members].reduce((a, id) => a + (H.get(id) || 0), 0) / j.members.size), control: j.control, inferred: !!j.inferred,

@@ -536,10 +536,12 @@ function drawBig() {
 window.__jd.toggleBig = toggleBig; window.__jd.startLesson = startLesson;
 window.__jd.traffic = () => T;
 // 调试 / 截图：把车放到最长的一段高架中间（?spot=highway）
+window.__jd.toTunnel = (k = 0.5) => { const g = map.segs.filter(x => x.ys && Math.min(...x.ys) < -6 && Math.max(...x.ys) > -0.5).sort((a, b) => b.len - a.len)[0]; if (!g) return null; const down = g.ys[0] > g.ys[g.ys.length - 1], zero = g.cum[g.ys.findIndex(v => v < -0.2)] || 0, u = down ? Math.max(2, zero - 25 + k * 60) : g.len * 0.3, q = offsetPoint(g, u, laneCenter(g, true, g.lf - 1), {}), h = Math.atan2(q.dz, q.dx); placeCar({ x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h, y: segY(g, u) }); S.car.gear = 'D'; return g.name + ' ' + u.toFixed(0) + '/' + g.len.toFixed(0) + ' y=' + segY(g, u).toFixed(1); };
 window.__jd.toHighway = (ramp) => {
   const g = ramp ? map.segs.filter(x => x.high && Math.min(...x.ys) < 0.3 && Math.max(...x.ys) > 6 && x.len > 120).sort((a, b) => a.len - b.len)[0] : map.segs.filter(x => x.high && x.ys.every(v => v > 7)).sort((a, b) => b.len - a.len)[0]; if (!g) return null;
   const u = ramp ? (g.ys[0] < 1 ? 30 : g.len - 110) : g.len * 0.4, q = offsetPoint(g, u, laneCenter(g, true, g.lf - 1), {}), h = Math.atan2(q.dz, q.dx);
   placeCar({ x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h, y: segY(g, u) }); S.car.gear = 'D'; return g.name;
 };
+if (params.get('spot') === 'tunnel') { window.__jd.freeze = null; window.__jd.toTunnel(+(params.get('k') || 0)); $('hud').style.display = ''; }
 if (params.get('spot') === 'highway') { window.__jd.freeze = null; window.__jd.toHighway(params.has('ramp')); $('hud').style.display = ''; }
 if (params.has('nohud')) $('hud').style.visibility = 'hidden';

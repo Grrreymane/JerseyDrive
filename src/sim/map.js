@@ -117,6 +117,7 @@ export function prepareMap(raw) {
   //   楼压到行车道上 → 这栋楼不画；只是离得近 → 把路边停车带收窄，至少留出 1.6 米人行道
   const P0 = {};
   for (const s of segs) {
+    if (s.tun) continue;      // 隧道在楼的下面，不影响地上的楼
     let clear = 1e9;
     for (let pass = 0; pass < 6; pass++) {
       clear = 1e9; let again = false;

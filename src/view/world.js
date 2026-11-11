@@ -79,7 +79,18 @@ export function buildWorld(map, scene) {
   });
   {
     const G = new Geo(), X = map.half.x + 400, Z = map.half.z + 400;
-    G.flat(-X, -Z, -X, Z, X, Z, X, -Z, CH, [1, 1, 1], 1 / 6);
+    // 地面是一张 48 米的大格子；隧道引道（路面在地面以下、还没完全进洞的那一段）上方要开洞，那些格子再切成 4 米的小格、挖掉压在引道上的
+    const F = 4, N = 12, holes = new Set(), P = {};
+    for (const s of map.segs) {
+      if (!s.ys) continue;
+      for (let u = 0; u <= s.len; u += 2) { const y = segY(s, u); if (y > -0.12 || y < -5.6) continue; pointAt(s, u, P); for (let o = -s.halfW - 1.2; o <= s.halfW + 1.2; o += 2) holes.add(Math.floor((P.x - P.dz * o) / F) + ',' + Math.floor((P.z + P.dx * o) / F)); }
+    }
+    const big = new Set(); for (const k of holes) { const [a, b] = k.split(',').map(Number); big.add(Math.floor(a / N) + ',' + Math.floor(b / N)); }
+    const S = F * N, nx = Math.ceil(X / S), nz = Math.ceil(Z / S);
+    for (let i = -nx; i < nx; i++) for (let k = -nz; k < nz; k++) {
+      if (!big.has(i + ',' + k)) { G.flat(i * S, k * S, i * S, (k + 1) * S, (i + 1) * S, (k + 1) * S, (i + 1) * S, k * S, CH, [1, 1, 1], 1 / 6); continue; }
+      for (let a = i * N; a < (i + 1) * N; a++) for (let b = k * N; b < (k + 1) * N; b++) if (!holes.has(a + ',' + b)) G.flat(a * F, b * F, a * F, (b + 1) * F, (a + 1) * F, (b + 1) * F, (a + 1) * F, b * F, CH, [1, 1, 1], 1 / 6);
+    }
     // 地面各层共面，靠 renderOrder 叠：人行道和路面写深度（后处理的接触阴影要读），深度比较一律通过，后画的盖先画的
     add(G.build(), toonMat({ map: texConcrete, side: DS, depthFunc: THREE.AlwaysDepth }), -30);
   }
@@ -214,6 +225,15 @@ export function buildWorld(map, scene) {
           Gb.quadN([pt(a, o0, 0), pt(b, o0, 0), pt(b, o1, bh), pt(a, o1, bh)], [ni, ni, ni, ni], CONC);
           Gb.quadN([pt(a, o1, bh), pt(b, o1, bh), pt(b, o2, bh), pt(a, o2, bh)], [UPN, UPN, UPN, UPN], CONC);
           Gb.quadN([pt(a, o2, bh), pt(b, o2, bh), pt(b, o2, -th), pt(a, o2, -th)], [n, n, n, n], CONC_D);
+        }
+        if (Math.max(a.y, b.y) < -0.25) {      // 隧道和引道：两侧的墙一直砌到地面；完全进洞后加一层顶（挡住阳光，洞里是暗的）
+          const WALL = lin('#8f8d88'), TILE2 = lin('#c9c6bd'), top = (r) => Math.min(CH, r.y + 5.2) - r.y;
+          for (const sg of [-1, 1]) {
+            const ni = [-a.rx * sg, 0, -a.rz * sg], o = sg * (w + 0.3);
+            Gb.quadN([pt(a, o, 0), pt(b, o, 0), pt(b, o, Math.min(1.4, top(b))), pt(a, o, Math.min(1.4, top(a)))], [ni, ni, ni, ni], TILE2);
+            Gb.quadN([pt(a, o, Math.min(1.4, top(a))), pt(b, o, Math.min(1.4, top(b))), pt(b, o, top(b)), pt(a, o, top(a))], [ni, ni, ni, ni], WALL);
+          }
+          if (hi < -5.3 + LIFT) Gb.quadN([pt(a, -w - 0.3, 5.2), pt(a, w + 0.3, 5.2), pt(b, w + 0.3, 5.2), pt(b, -w - 0.3, 5.2)], [DN, DN, DN, DN], WALL);
         }
         if (hi > 1.2) Gb.quadN([pt(a, -w - 0.42, -TH), pt(a, w + 0.42, -TH), pt(b, w + 0.42, -TH), pt(b, -w - 0.42, -TH)], [DN, DN, DN, DN], CONC_D);
         // 车道线：左边黄实线、右边白实线、车道之间白虚线
