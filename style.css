@@ -68,8 +68,8 @@ button.ghost { background: rgba(255, 255, 255, 0.07); color: var(--text); font-w
 #lessonBox { position: absolute; bottom: 92px; left: 16px; width: 270px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; font-size: 13px; }
 #lessonBox b { display: block; font-size: 14px; margin-bottom: 4px; } #lessonBox div { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; color: var(--dim); }
 #lessonBox div.ok { color: #58d68d; } #lessonBox div.bad { color: #ff7b72; }
-#lessonList { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; margin: 4px 0 16px; }
-#lessonList button { text-align: left; padding: 9px 12px; font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; } #lessonList button span { color: #e0a030; letter-spacing: 1px; white-space: nowrap; }
+#lessonList { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 4px 0 14px; }
+#lessonList button { text-align: left; padding: 7px 10px; font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; } #lessonList button span { color: #e0a030; letter-spacing: 1px; white-space: nowrap; }
 #ldStars { font-size: 34px; letter-spacing: 6px; color: #e0a030; text-align: center; margin: 2px 0 8px; }
 /* 碰撞：四周泛红 + 一行大字，1.7 秒后退回去 */
 #hit { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; opacity: 0; transition: opacity 0.5s; background: radial-gradient(ellipse at center, rgba(200, 20, 20, 0) 35%, rgba(190, 15, 15, 0.75) 100%); }
