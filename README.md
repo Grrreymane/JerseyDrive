@@ -119,3 +119,10 @@ node tools/cdp.mjs "http://127.0.0.1:8765/?style=cel&fly&v=8&len=260&q=0" --vide
 - 分区：`tools/regions.json` 定义三个区域（市中心、Journal Square、Newark 市中心），各一张独立地图。`node tools/fetch_osm.mjs <id>` 下载、`node tools/build_map.mjs <id>` 构建；游戏里在开始界面选，或 `?map=jsq|newark`。新区域的原始数据不进 git。
 - 新课程 11–15：变道、上高速、直线倒车、三点掉头、侧方停车（后三个是新泽西路考项目）。位置 / 动作类的进度在 `main.js` 的 `lessonSim` 里算。
 - `cover.png` / `cover_en.png`：封面。
+
+### 第七轮：导航、三区连通大图
+
+- 导航：大地图上点一下设目的地（`main.js` 末尾“导航”一节）。
+- 区域多了“三区连通（大图）”：13.6 × 4.7 公里，746 公里路、4 万栋楼，JC 经 14th St 高架、NJ 139、Pulaski Skyway 能一路开到 Newark。同一路线帧率和单区持平，内存约 750 MB（单区约 210 MB）。
+- 为大图改的：人行道占位查询用格子（原来逐个比，平方级）；路名贴图按数量分列；车和行人在玩家周围取点生成；车流死结 45 秒后撤车。
+- 开始按钮就是自由练习（按钮上写着当前区域）。

@@ -3,7 +3,7 @@ import fs from 'fs';
 const R = JSON.parse(fs.readFileSync(new URL('./regions.json', import.meta.url)))[process.argv[2]];
 if (!R) { console.log('没有这个区域'); process.exit(1); }
 const b = R.bbox.join(',');
-const q = `[out:json][timeout:150];(
+const q = `[out:json][timeout:300][maxsize:1073741824];(
   way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street)$"](${b});
   node["highway"~"^(traffic_signals|stop|crossing|give_way)$"](${b});
   way["building"](${b}); way["leisure"="park"](${b});

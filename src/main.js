@@ -45,7 +45,7 @@ function applyStyle(i, announce) {
 { let saved = null; try { saved = localStorage.getItem('jdStyle2'); } catch { /* 同上 */ } applyStyle(Math.max(0, STYLES.findIndex(x => x.id === (params.get('style') || saved)))); }
 
 // 区域：三张独立的地图，开始界面上选（换区域 = 带着 ?map= 重新打开页面）
-const REGIONS = { downtown: ['Jersey City 市中心', 'data/map.json'], jsq: ['Journal Square', 'data/map_jsq.json'], newark: ['Newark 市中心', 'data/map_newark.json'] };
+const REGIONS = { downtown: ['Jersey City 市中心', 'data/map.json'], jsq: ['Journal Square', 'data/map_jsq.json'], newark: ['Newark 市中心', 'data/map_newark.json'], all: ['三区连通（大图）', 'data/map_all.json'] };
 let region = params.get('map'); try { region = region || localStorage.getItem('jdRegion'); } catch { /* 存不了就用默认 */ }
 if (!REGIONS[region]) region = 'downtown';
 $('regionList').innerHTML = Object.entries(REGIONS).map(([id, r]) => `<button class="${id === region ? '' : 'ghost'}" data-id="${id}">${r[0]}</button>`).join('');
@@ -75,10 +75,11 @@ const audio = makeAudio();
 
 // ---------- 状态 ----------
 const S = { car: makeCar(), R: makeRules(), t: 0, running: false, paused: true, coach: true, driveTime: 0, startOdo: 0, clean: 0 };
+const HOME = region === 'all' ? [5230, 720] : [0, 0];      // 连通大图的中心在沼泽地里，出发点放在 JC 市中心
 const startPose = (() => {
   const want = params.get('seg');
-  const seg = (want && map.segs[+want]) || map.segs.filter(s => s.cls === 'residential' && s.oneway && s.useLen > 110 && s.lf === 1 && Math.abs(s.px[0]) < 350 && Math.abs(s.pz[0]) < 350)
-    .sort((a, b) => Math.hypot(a.px[0], a.pz[0]) - Math.hypot(b.px[0], b.pz[0]))[0] || map.segs.find(s => s.useLen > 80);
+  const seg = (want && map.segs[+want]) || map.segs.filter(s => s.cls === 'residential' && s.oneway && s.useLen > 110 && s.lf === 1 && Math.abs(s.px[0] - HOME[0]) < 350 && Math.abs(s.pz[0] - HOME[1]) < 350)
+    .sort((a, b) => Math.hypot(a.px[0] - HOME[0], a.pz[0] - HOME[1]) - Math.hypot(b.px[0] - HOME[0], b.pz[0] - HOME[1]))[0] || map.segs.find(s => s.useLen > 80);
   const q = offsetPoint(seg, seg.trimA + 18, laneCenter(seg, true, seg.lf - 1), {});
   const h = Math.atan2(q.dz, q.dx);
   return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h };
@@ -399,7 +400,7 @@ if (params.has('clay')) {
 world.updateLod(S.car.x, S.car.z); view.update(S.car, 0, 0); sky.update(view.camera, S.car.x, S.car.z); post.render(scene, view.camera);
 // 场景里几千个物体绝大多数不动：关掉每次渲染前的全场景矩阵刷新，会动的（自己的车、镜头、太阳）各自手动刷新
 scene.updateMatrixWorld(true); scene.matrixWorldAutoUpdate = false;
-$('btnStart').disabled = false; $('btnStart').textContent = '开始练车（Enter）';
+$('btnStart').disabled = false; $('btnStart').textContent = `自由练习 · ${REGIONS[region][0]}（Enter）`;
 if (params.has('autostart')) start();
 requestAnimationFrame(tick);
 

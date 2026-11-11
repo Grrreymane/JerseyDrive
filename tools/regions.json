@@ -1,5 +1,50 @@
 {
-  "downtown": { "name": "Jersey City 市中心", "en": "Downtown JC", "bbox": [40.7080, -74.0680, 40.7370, -74.0300], "raw": "osm.json", "out": "map.json" },
-  "jsq": { "name": "Journal Square", "en": "Journal Square", "bbox": [40.7180, -74.0880, 40.7470, -74.0500], "raw": "osm_jsq.json", "out": "map_jsq.json" },
-  "newark": { "name": "Newark 市中心", "en": "Downtown Newark", "bbox": [40.7210, -74.1920, 40.7500, -74.1540], "raw": "osm_newark.json", "out": "map_newark.json" }
+  "downtown": {
+    "name": "Jersey City 市中心",
+    "en": "Downtown JC",
+    "bbox": [
+      40.708,
+      -74.068,
+      40.737,
+      -74.03
+    ],
+    "raw": "osm.json",
+    "out": "map.json"
+  },
+  "jsq": {
+    "name": "Journal Square",
+    "en": "Journal Square",
+    "bbox": [
+      40.718,
+      -74.088,
+      40.747,
+      -74.05
+    ],
+    "raw": "osm_jsq.json",
+    "out": "map_jsq.json"
+  },
+  "newark": {
+    "name": "Newark 市中心",
+    "en": "Downtown Newark",
+    "bbox": [
+      40.721,
+      -74.192,
+      40.75,
+      -74.154
+    ],
+    "raw": "osm_newark.json",
+    "out": "map_newark.json"
+  },
+  "all": {
+    "name": "JC + JSQ + Newark 连通",
+    "en": "All",
+    "bbox": [
+      40.708,
+      -74.192,
+      40.75,
+      -74.03
+    ],
+    "raw": "osm_all.json",
+    "out": "map_all.json"
+  }
 }

@@ -53,8 +53,9 @@ function planTurn(T, c) {
 function spawnCar(T, pl) {
   const map = T.map;
   for (let tries = 0; tries < 12; tries++) {
-    const seg = map.segs[Math.floor(T.rnd() * map.segs.length)]; if (seg.useLen < 34) continue;
-    const mx = seg.px[seg.n >> 1], mz = seg.pz[seg.n >> 1], d = Math.hypot(mx - pl.x, mz - pl.z); if (d > SPAWN_R || d < 70) continue;
+    // 在玩家周围随机取一个点，找离它最近的路（从全图的路里随机抽的话，图一大就几乎抽不到附近的）
+    const a0 = T.rnd() * 6.2832, r0 = 70 + T.rnd() * (SPAWN_R - 70), seg = map.locate(pl.x + Math.cos(a0) * r0, pl.z + Math.sin(a0) * r0, P).seg; if (!seg || seg.useLen < 34) continue;
+    const mx = seg.px[seg.n >> 1], mz = seg.pz[seg.n >> 1], d = Math.hypot(mx - pl.x, mz - pl.z); if (d > SPAWN_R + 150) continue;
     const fwd = seg.lb === 0 || T.rnd() < 0.5; if (!useLane(seg, fwd)) continue;
     const c = { id: T.nextId++, kind: 'car', mode: 'seg', seg, fwd, idx: Math.floor(T.rnd() * useLane(seg, fwd)), u: 6 + T.rnd() * (seg.useLen - 24), v: 0, L: 4.5, W: 1.8, col: Math.floor(T.rnd() * 12), suv: T.rnd() < 0.3, wait: 0, stopT: -1, x: 0, z: 0, h: 0, plan: null, w: 0 };
     poseOnSeg(c);
@@ -68,7 +69,7 @@ function spawnCar(T, pl) {
 function spawnPed(T, pl) {
   const map = T.map;
   for (let tries = 0; tries < 10; tries++) {
-    const seg = map.segs[Math.floor(T.rnd() * map.segs.length)]; if (seg.useLen < 30 || seg.speed > 36 || seg.high) continue;
+    const a0 = T.rnd() * 6.2832, r0 = 25 + T.rnd() * (PED_R - 25), seg = map.locate(pl.x + Math.cos(a0) * r0, pl.z + Math.sin(a0) * r0, Q).seg; if (!seg || seg.useLen < 30 || seg.speed > 36 || seg.high) continue;
     const u = seg.trimA + 6 + T.rnd() * (seg.useLen - 12), side = T.rnd() < 0.5 ? 1 : -1;
     pointAt(seg, u, P); const d = Math.hypot(P.x - pl.x, P.z - pl.z); if (d > PED_R || d < 25) continue;
     const off = seg.halfW + 0.75 + T.rnd() * 0.35;
@@ -199,6 +200,9 @@ export function stepTraffic(T, pl, t, dt) {
     const target = Math.min(vmax, gap <= 0 ? 0 : Math.sqrt(2 * 2.6 * gap));
     c.v = target > c.v ? Math.min(target, c.v + 1.9 * dt) : Math.max(target, c.v - 5.5 * dt);
     if (gap <= 0.15) c.v = 0;
+    // 互相等成了死结（几个挨得很近的路口里各卡一辆）：停了 45 秒以上（比最长的红灯还久）、又不在玩家眼前的，直接撤掉
+    c.stuck = c.v < 0.05 ? (c.stuck || 0) + dt : 0;
+    if (c.stuck > 45 && Math.hypot(c.x - pl.x, c.z - pl.z) > 45) { c.dead = true; continue; }
     const step = c.v * dt; let justIn = false;
     if (c.mode === 'seg') {
       c.u += step;

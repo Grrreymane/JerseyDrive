@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "map": "node tools/build_map.mjs",
-    "test": "node tools/test_rules.mjs && node tools/test_traffic.mjs && node tools/test_traffic.mjs map_jsq.json && node tools/test_traffic.mjs map_newark.json",
+    "test": "node tools/test_rules.mjs && node tools/test_traffic.mjs && node tools/test_traffic.mjs map_jsq.json && node tools/test_traffic.mjs map_newark.json && node tools/test_traffic.mjs map_all.json",
     "serve": "python -m http.server 8765"
   }
 }

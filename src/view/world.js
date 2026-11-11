@@ -261,8 +261,10 @@ export function buildWorld(map, scene) {
 
   // ---------- 建筑 ----------
   // 人行道上的东西（门前台阶、杆子、树、路灯、消防栓）登记占位，后放的避开先放的
-  const occ = [], occupy = (x, z, r) => occ.push(x, z, r);
-  const isFree = (x, z, r) => { for (let i = 0; i < occ.length; i += 3) if (Math.hypot(occ[i] - x, occ[i + 1] - z) < occ[i + 2] + r) return false; return true; };
+  // 用 8 米的格子存：逐个比的话，东西多了以后是平方级的慢（三区连通的大图要多等二十几秒）
+  const occ = new Map(), OC = 8, okey = (x, z) => Math.floor(x / OC) * 100003 + Math.floor(z / OC);
+  const occupy = (x, z, r) => { const k = okey(x, z); let a = occ.get(k); if (!a) occ.set(k, a = []); a.push(x, z, r); };
+  const isFree = (x, z, r) => { for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const a = occ.get(okey(x + dx * OC, z + dz * OC)); if (a) for (let i = 0; i < a.length; i += 3) if (Math.hypot(a[i] - x, a[i + 1] - z) < a[i + 2] + r) return false; } return true; };
   const inPolyV = (pts, x, z) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a.y > z) !== (b.y > z) && x < (b.x - a.x) * (z - a.y) / (b.y - a.y) + a.x) c = !c; } return c; };
   const bld = buildBuildings(map, raised, occupy, (x, z, r) => isFree(x, z, r));
 

@@ -102,7 +102,7 @@ export function signDataURL(id, S = 160) { const c = document.createElement('can
 export const shortName = (n) => n.replace(/\bStreet\b/, 'St').replace(/\bAvenue\b/, 'Ave').replace(/\bBoulevard\b/, 'Blvd').replace(/\bDrive\b/, 'Dr').replace(/\bPlace\b/, 'Pl').replace(/\bCourt\b/, 'Ct').replace(/\bParkway\b/, 'Pkwy').replace(/\bSaint\b/, 'St.');
 /** 路名牌图集（绿底白字） */
 export function makeNameAtlas(names) {
-  const W = 512, H = 80, cols = 2, rows = Math.ceil(names.length / cols);
+  const W = 512, H = 80, cols = Math.max(2, Math.ceil(names.length / 200)), rows = Math.ceil(names.length / cols);      // 一列最多 200 个：贴图边长不能超过 16384
   const canvas = document.createElement('canvas'); canvas.width = W * cols; canvas.height = Math.max(H, rows * H);
   const ctx = canvas.getContext('2d'); const uvs = {};
   names.forEach((n, i) => {

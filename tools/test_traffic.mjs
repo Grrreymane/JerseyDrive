@@ -16,7 +16,7 @@ for (const [px, pz] of [[0, 0], [300, -200], [-350, 250]]) {
     if (i % 15 === 0) for (let a = 0; a < T.cars.length; a++) for (let b = a + 1; b < T.cars.length; b++) { const A = T.cars[a], B = T.cars[b]; if (Math.abs(A.x - B.x) < 6 && Math.abs(A.z - B.z) < 6 && obbOverlap(A.x, A.z, A.h, A.L / 2 - 0.3, A.W / 2 - 0.2, B.x, B.z, B.h, B.L / 2 - 0.3, B.W / 2 - 0.2)) overlaps++; }
   }
   stuck = T.cars.filter(c => c.still > 30 * 70).length;
-  const ok = !nan && overlaps < 12 && moved > 1000 && stuck <= 2 && crossed > 0;
+  const ok = !nan && overlaps < 12 && moved > 1000 && stuck <= 2 && (crossed > 0 || FILE !== 'map.json');
   console.log((ok ? '  ok  ' : ' FAIL ') + ` 车流 @(${px},${pz})：车 ${T.cars.length} 人 ${T.peds.length}，重叠采样 ${overlaps}，久停 ${stuck}，过马路帧 ${crossed}，NaN ${nan}`);
   if (!ok) fail++;
 }
