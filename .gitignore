@@ -3,3 +3,4 @@ node_modules/
 shots/
 samples/
 tools/raw/osm_*.json
+tools/raw/overture_*

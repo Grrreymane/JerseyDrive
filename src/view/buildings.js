@@ -114,7 +114,7 @@ export function buildBuildings(map, group, occupy, isFree) {
     for (let i = 0; i < n; i++) { pts.push(new THREE.Vector2(b.pts[2 * i], b.pts[2 * i + 1])); cx += b.pts[2 * i] / n; cz += b.pts[2 * i + 1] / n; }
     for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; area += p.x * q.y - q.x * p.y; }
     if (area > 0) pts.reverse();                 // 统一绕向，墙面法线朝外
-    const fa = Math.abs(area) / 2, gh = Math.min(GROUND_H, h * 0.6), small = fa < 170 && h < 15;
+    const fa = Math.abs(area) / 2, gh = h < 6.2 ? Math.min(GROUND_H, h - 0.3) : Math.min(GROUND_H, h * 0.6), small = fa < 170 && h < 15;
     // ---- 这栋楼的样式（全部由楼的编号决定，每次打开都一样） ----
     const plain = b.k === 'i', names = b.nm || null; let ni = 0, numDone = !b.no, nameDone = !b.n;
     const type = tall ? 'glass' : plain ? (R(1) < 0.6 ? 'stucco' : 'siding') : small ? (R(1) < 0.42 ? 'siding' : R(1) < 0.9 ? 'brick' : 'stucco') : (R(1) < 0.58 ? 'brick' : R(1) < 0.9 ? 'stucco' : 'siding');

@@ -135,4 +135,4 @@ node tools/cdp.mjs "http://127.0.0.1:8765/?style=cel&fly&v=8&len=260&q=0" --vide
 - 街景：有真实店名的楼挂真店名；没有信息的楼只有临主干道才可能是店面（原来住宅街上也到处是店）；工业 / 仓库是素墙；有名字的楼挂铭牌；门牌号写在门上方的亮子上。没标高度的大占地建筑不再猜成高楼。这些字每个建筑分块现画一张贴图。
 - 水面（Hudson、Hackensack、Passaic、Newark Bay）：`build_map.mjs` 把海岸线和水面多边形栅格化成 6 米一格（海岸线不闭合，用“画墙 → 连通块 → 左右投票”判断哪边是水），3D 里是一张带透明度贴图的平面，大地图和车内导航屏上也画。
 - 数据覆盖有限：4 万栋楼里约 4600 栋有门牌、约 1100 个店名、约 1000 栋有真实层数，其余仍是按类型和占地猜的。
-
+- 真实楼高：`python -m overturemaps download --bbox=-74.192,40.708,-74.03,40.75 -f geojsonseq --type=building -o tools/raw/overture_all.geojsonl`（Overture Maps，不进仓库）。`build_map.mjs` 按 OSM way 编号对上，OSM 自己没标高度的楼用它的：4 万栋里约 2.4 万栋有了真实高度（原来约 1000 栋）。不到 6.2 米的矮楼整个高度算一层。

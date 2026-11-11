@@ -258,6 +258,11 @@ const buildings = [], parks = [];
 const XP = path.join(ROOT, 'tools/raw', REGION.raw.replace('.json', '_x.json')), extra = fs.existsSync(XP) ? JSON.parse(fs.readFileSync(XP, 'utf8')).elements : [];
 const inPoly = (pts, x, z) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a[1] > z) !== (b[1] > z) && x < (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
 const landuse = extra.filter(e => e.type === 'way' && e.tags && e.tags.landuse && e.geometry).map(e => { const pts = e.geometry.map(g => proj(g.lat, g.lon)); return { k: e.tags.landuse, pts, x0: Math.min(...pts.map(p => p[0])), x1: Math.max(...pts.map(p => p[0])), z0: Math.min(...pts.map(p => p[1])), z1: Math.max(...pts.map(p => p[1])) }; });
+// Overture Maps 的建筑数据（python -m overturemaps download --bbox=西,南,东,北 -f geojsonseq --type=building -o tools/raw/overture_<id>.geojsonl）：
+// 六成的楼有高度（来自激光雷达和微软的建筑数据），OSM 自己只有百分之几。它的每栋楼记着对应的 OSM way 编号，直接按编号对上
+const OV = new Map(); { const P = path.join(ROOT, 'tools/raw', `overture_${process.argv[2] || 'downtown'}.geojsonl`); if (fs.existsSync(P)) for (const line of fs.readFileSync(P, 'utf8').split('\n')) { const t = line.replace(/^\x1e/, '').trim(); if (!t) continue; const p = JSON.parse(t).properties, src = (p.sources || []).find(q => q.dataset === 'OpenStreetMap' && /^w\d+/.test(q.record_id || '')); if (src && (p.height || p.num_floors || p.class)) OV.set(+src.record_id.slice(1).split('@')[0], p); } }
+const OVKIND = { residential: 'r', house: 'r', apartments: 'r', detached: 'r', terrace: 'r', dormitory: 'r', semidetached_house: 'r', industrial: 'i', warehouse: 'i', garage: 'i', garages: 'i', shed: 'i', parking: 'i', service: 'i', commercial: 's', retail: 's', supermarket: 's', office: 'c', school: 'c', university: 'c', college: 'c', hospital: 'c', church: 'c', civic: 'c', hotel: 'c', public: 'c', government: 'c' };
+let nOv = 0;
 const KIND = {}; for (const [k, list] of Object.entries({
   r: 'house detached terrace residential apartments dormitory semidetached_house bungalow',
   i: 'industrial warehouse storage_tank garage garages shed service roof hangar parking ventilation_shaft bridge construction cabin carport',
@@ -277,7 +282,10 @@ for (const w of ways) {
     let k = KIND[t.building] || '';
     if (!k) { const lu = landuse.find(l => cx >= l.x0 && cx <= l.x1 && cz >= l.z0 && cz <= l.z1 && inPoly(l.pts, cx, cz)); if (lu) k = lu.k === 'residential' ? 'r' : lu.k === 'industrial' ? 'i' : 's'; }
     if (t.amenity && CIVIC.has(t.amenity)) k = 'c';
-    const lv = parseFloat(t['building:levels']), real = parseFloat(t.height) || (lv ? lv * 3.3 + 1.5 : 0);
+    const lv = parseFloat(t['building:levels']), ov = OV.get(w.id);
+    let real = parseFloat(t.height) || (lv ? lv * 3.3 + 1.5 : 0);
+    if (!real && ov) { real = ov.height >= 2.5 ? ov.height : ov.num_floors ? ov.num_floors * 3.3 + 1.5 : 0; if (real) nOv++; }
+    if (!k && ov && OVKIND[ov.class || ov.subtype]) k = OVKIND[ov.class || ov.subtype];
     let h = real;
     if (!h) {      // 没标高度：按类型和占地猜。占地很大又没标的多半是仓库、卖场，不是高楼
       const r = hash(w.id);
@@ -308,6 +316,7 @@ for (const w of ways) {
     if (t.shop || SHOPLIKE.has(t.amenity) || t.craft) { const nm = cleanName(t.name); b.nm = b.nm || []; if (b.nm.length < 5 && !b.nm.includes(nm)) { b.nm.push(nm); nShop++; } }
     else if (CIVIC.has(t.amenity) || t.tourism === 'hotel' || t.tourism === 'museum') { if (!b.n) { b.n = cleanName(t.name); nCivic++; } }
   }
+  console.log(`heights from Overture ${nOv}; over 38 m: ${buildings.filter(b => b.h > 38).length}`);
   console.log(`extra: shop names ${nShop}, named places ${nCivic}, house numbers from nodes ${nAddr}; buildings with number ${buildings.filter(b => b.no).length}, with kind ${buildings.filter(b => b.k).length}`);
   for (const b of buildings) { delete b.poly; delete b.cx; delete b.cz; delete b.rr; }
 }
