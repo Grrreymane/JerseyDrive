@@ -17,7 +17,7 @@ export function buildActors(scene, max = 48) {
       let a = 0, b = 0, k = 0;
       for (const c of T.cars) {
         const m = c.suv ? suv : sedan, i = c.suv ? b++ : a++; if (i >= max) continue;
-        Q.setFromAxisAngle(UP, -c.h); M.compose(V.set(c.x, 0, c.z), Q, S); m.setMatrixAt(i, M);
+        Q.setFromAxisAngle(UP, -c.h); M.compose(V.set(c.x, c.y || 0, c.z), Q, S); m.setMatrixAt(i, M);
         // 被撞停住的车打双闪：车身颜色一明一暗
         m.setColorAt(i, c.hitT > 0 && (t * 2.6) % 1 < 0.5 ? WHITE.copy(cols[c.col % cols.length]).multiplyScalar(1.6) : cols[c.col % cols.length]);
       }

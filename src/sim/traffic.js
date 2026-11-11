@@ -1,6 +1,6 @@
 // 车流和行人：纯逻辑。别的车沿车道开，会等红灯、在 STOP 前停、让路口里的车和过马路的人；
 // 行人沿人行道走，到有斑马线的路口过马路。只在玩家附近生成，走远了回收。
-import { LANE_W, STOP_LINE, XWALK_NEAR, XWALK_FAR, CAR, offsetPoint, pointAt, laneCenter, turnType, signalState, obbOverlap } from './map.js';
+import { LANE_W, STOP_LINE, XWALK_NEAR, XWALK_FAR, CAR, offsetPoint, pointAt, laneCenter, turnType, signalState, obbOverlap, segY } from './map.js';
 import { MPH } from './car.js';
 
 const N_CARS = 26, N_PEDS = 30, SPAWN_R = 240, KEEP_R = 320, PED_R = 150, PED_KEEP = 210, WALK = 1.35;
@@ -19,7 +19,7 @@ const endJ = (seg, fwd) => fwd ? seg.jb : seg.ja;
 function poseOnSeg(c) {
   const seg = c.seg, sAbs = c.fwd ? seg.trimA + c.u : seg.len - seg.trimB - c.u;
   offsetPoint(seg, sAbs, laneCenter(seg, c.fwd, c.idx), P);
-  c.x = P.x; c.z = P.z; c.h = Math.atan2(P.dz, P.dx) + (c.fwd ? 0 : Math.PI);
+  c.x = P.x; c.z = P.z; c.h = Math.atan2(P.dz, P.dx) + (c.fwd ? 0 : Math.PI); c.y = segY(seg, sAbs);
 }
 const bez = (a, b, c, t) => (1 - t) * (1 - t) * a + 2 * (1 - t) * t * b + t * t * c;
 
@@ -68,7 +68,7 @@ function spawnCar(T, pl) {
 function spawnPed(T, pl) {
   const map = T.map;
   for (let tries = 0; tries < 10; tries++) {
-    const seg = map.segs[Math.floor(T.rnd() * map.segs.length)]; if (seg.useLen < 30 || seg.speed > 36) continue;
+    const seg = map.segs[Math.floor(T.rnd() * map.segs.length)]; if (seg.useLen < 30 || seg.speed > 36 || seg.high) continue;
     const u = seg.trimA + 6 + T.rnd() * (seg.useLen - 12), side = T.rnd() < 0.5 ? 1 : -1;
     pointAt(seg, u, P); const d = Math.hypot(P.x - pl.x, P.z - pl.z); if (d > PED_R || d < 25) continue;
     const off = seg.halfW + 0.75 + T.rnd() * 0.35;
@@ -149,10 +149,10 @@ export function stepTraffic(T, pl, t, dt) {
     // 前面的东西：同车道的车、路口里刚进去的车、玩家
     for (const o of cars) {
       if (o === c) continue;
-      const dx = o.x - c.x, dz = o.z - c.z, ahead = dx * hx + dz * hz; if (ahead < 0.5 || ahead > 40) continue;
+      const dx = o.x - c.x, dz = o.z - c.z, ahead = dx * hx + dz * hz; if (ahead < 0.5 || ahead > 40 || Math.abs((o.y || 0) - (c.y || 0)) > 3) continue;
       if (Math.abs(-dx * hz + dz * hx) < 1.7 && Math.cos(o.h - c.h) > -0.3) gap = Math.min(gap, ahead - (c.L + o.L) / 2 - 2.2);
     }
-    { const dx = pl.x - c.x, dz = pl.z - c.z, ahead = dx * hx + dz * hz, side = Math.abs(-dx * hz + dz * hx); if (ahead > 0.5 && ahead < 40 && side < 1.9 + Math.min(1.5, Math.abs(pl.v) * 0.15) * (c.mode === 'junc' ? 1 : 0)) gap = Math.min(gap, ahead - (c.L + CAR.L) / 2 - 2.4); }
+    { const dx = pl.x - c.x, dz = pl.z - c.z, ahead = dx * hx + dz * hz, side = Math.abs(-dx * hz + dz * hx); if (Math.abs((pl.y || 0) - (c.y || 0)) < 3 && ahead > 0.5 && ahead < 40 && side < 1.9 + Math.min(1.5, Math.abs(pl.v) * 0.15) * (c.mode === 'junc' ? 1 : 0)) gap = Math.min(gap, ahead - (c.L + CAR.L) / 2 - 2.4); }
     if (c.mode === 'seg') {
       const j = endJ(seg, c.fwd), toEdge = seg.useLen - c.u, dstop = toEdge - STOP_LINE - c.L / 2 - 0.4, pn = c.plan;
       if (j && pn && j.control !== 'joint') {
@@ -209,7 +209,7 @@ export function stepTraffic(T, pl, t, dt) {
     if (c.mode === 'junc') {
       const p = c.plan; if (!justIn) c.w += step;
       if (c.w >= p.len) { c.mode = 'seg'; c.seg = p.seg; c.fwd = p.fwd; c.idx = p.idx; c.u = c.w - p.len; c.w = 0; planTurn(T, c); poseOnSeg(c); }
-      else { const k = c.w / p.len; c.x = bez(p.x0, p.cx, p.x2, k); c.z = bez(p.z0, p.cz, p.z2, k); c.h = Math.atan2(2 * (1 - k) * (p.cz - p.z0) + 2 * k * (p.z2 - p.cz), 2 * (1 - k) * (p.cx - p.x0) + 2 * k * (p.x2 - p.cx)); }
+      else { const k = c.w / p.len; c.x = bez(p.x0, p.cx, p.x2, k); c.z = bez(p.z0, p.cz, p.z2, k); c.y = p.j.y || 0; c.h = Math.atan2(2 * (1 - k) * (p.cz - p.z0) + 2 * k * (p.z2 - p.cz), 2 * (1 - k) * (p.cx - p.x0) + 2 * k * (p.x2 - p.cx)); }
     }
   }
 }
@@ -217,9 +217,9 @@ export function stepTraffic(T, pl, t, dt) {
 /** 玩家车身有没有撞到别的车 / 行人；有没有贴着正在过马路的行人开过去。返回 { car, ped, closePed } */
 export function playerContacts(T, pl) {
   const out = { car: null, ped: null, closePed: null }, hx = Math.cos(pl.h), hz = Math.sin(pl.h);
-  for (const c of T.cars) if (Math.abs(c.x - pl.x) < 6 && Math.abs(c.z - pl.z) < 6 && obbOverlap(pl.x, pl.z, pl.h, CAR.L / 2, CAR.W / 2, c.x, c.z, c.h, c.L / 2, c.W / 2)) { out.car = c; break; }
+  for (const c of T.cars) if (Math.abs(c.x - pl.x) < 6 && Math.abs(c.z - pl.z) < 6 && Math.abs((c.y || 0) - (pl.y || 0)) < 2 && obbOverlap(pl.x, pl.z, pl.h, CAR.L / 2, CAR.W / 2, c.x, c.z, c.h, c.L / 2, c.W / 2)) { out.car = c; break; }
   for (const p of T.peds) {
-    if (!p.onRoad) continue;
+    if (!p.onRoad || (pl.y || 0) > 2) continue;
     const dx = p.x - pl.x, dz = p.z - pl.z, a = dx * hx + dz * hz, b = -dx * hz + dz * hx;
     if (Math.abs(a) < CAR.L / 2 + 0.25 && Math.abs(b) < CAR.W / 2 + 0.25) { out.ped = p; break; }
     if (!p.flagged && a > CAR.L / 2 - 0.5 && a < CAR.L / 2 + 3.2 && Math.abs(b) < CAR.W / 2 + 1.6 && pl.v > 1.6) out.closePed = p;

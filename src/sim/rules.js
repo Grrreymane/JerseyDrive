@@ -49,20 +49,22 @@ export function stepRules(R, car, map, t, dt, T = null) {
     if (car.signal) R.sigOdo = car.odo; else { R.offDir = R.lastSignal; R.offOdo = car.odo; R.offOn = R.sigOdo; }
     R.lastSignal = car.signal;
   }
-  map.locate(c.x, c.z, loc);
+  const cy = car.y || 0;
+  map.locate(c.x, c.z, loc, cy);
   const seg = loc.seg;
   if (!seg) { R.needReset = { flip: true }; return; }
+  car.y = cy + (loc.y - cy) * Math.min(1, dt * 12);      // 车跟着路面升降
   const fwd = Math.cos(car.h) * loc.dx + Math.sin(car.h) * loc.dz >= 0;
-  const jf = map.junctionAt(f.x, f.z), jc = map.junctionAt(c.x, c.z);
+  const jf = map.junctionAt(f.x, f.z, cy), jc = map.junctionAt(c.x, c.z, cy);
   const key = seg.id * 2 + (fwd ? 1 : 0);
   const sp = Math.abs(car.v), street = jc ? jc.name : seg.name;
   R.cur = { seg, fwd, s: loc.s, o: loc.o, junc: jc, street };
 
   // 撞到停着的车 / 开出路面
-  if (map.hitParked(c.x, c.z, car.h, CAR.L / 2, CAR.W / 2)) { emit(R, 'crash', car, t, street); R.needReset = {}; return; }
+  if (cy < 1.5 && map.hitParked(c.x, c.z, car.h, CAR.L / 2, CAR.W / 2)) { emit(R, 'crash', car, t, street); R.needReset = {}; return; }
   R.alert = null; const sp0 = Math.abs(car.v);
   if (T) {
-    const k = playerContacts(T, { x: c.x, z: c.z, h: car.h, v: car.v });
+    const k = playerContacts(T, { x: c.x, z: c.z, h: car.h, v: car.v, y: cy });
     if (k.ped) { emit(R, 'hit_ped', car, t, street); k.ped.flagged = true; k.ped.mode = 'down'; k.ped.downT = 0; k.ped.onRoad = false; R.needReset = { back: true }; return; }
     if (k.car) { emit(R, 'hit_car', car, t, street); k.car.hitT = 6; k.car.v = 0; R.needReset = { back: true }; return; }
     if (k.closePed) { k.closePed.flagged = true; emit(R, 'no_yield_ped', car, t, street); }
@@ -71,7 +73,7 @@ export function stepRules(R, car, map, t, dt, T = null) {
     if (R.alert === 'ped') { if (sp0 < 0.2) R.yieldStop = true; R.yieldSeen = t; }
     else if (R.yieldStop && t - R.yieldSeen > 0.4) { R.yieldStop = false; emit(R, 'good_yield', car, t, street); }
   }
-  if (!map.onRoad(c.x, c.z, 0.3)) {
+  if (!map.onRoad(c.x, c.z, 0.3, cy)) {
     const dead = (loc.s < 1 && !seg.ja) || (loc.s > seg.len - 1 && !seg.jb);
     if (dead) { emit(R, 'map_edge', car, t, street); R.needReset = { flip: true }; }
     else { emit(R, 'off_road', car, t, street); R.needReset = {}; }

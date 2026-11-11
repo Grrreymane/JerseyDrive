@@ -121,7 +121,8 @@ export function buildCarView(scene, renderer, navCanvas) {
     GH.aabb(-0.1, 1.675, -0.75, 1.8, 1.7, 0.75, LINER);                                                  // 顶棚
     GH.aabb(-0.92, 0.97, -0.85, -0.18, 1.01, 0.85, FACE);                                                // 后窗台
     GS.ellipsoid(0.02, 0.98, 0, 0.1, 0.36, 0.7, SEAT, 8, 14); GS.ellipsoid(0.3, 0.62, 0, 0.27, 0.075, 0.7, SEAT, 6, 14);     // 后排
-    GH.pipe([[1.86, 1.6, 0], [1.9, 1.53, 0], [1.94, 1.47, 0]], 0.012, 7, BLACK);                          // 内后视镜的支架
+    GH.pipe([[1.86, 1.6, 0], [1.9, 1.53, 0], [1.94, 1.47, 0]], 0.012, 7, BLACK);
+    GH.pipe([[2.74, 0.9, 0.9], [2.76, 1.02, 0.95], [2.76, 1.1, 0.985]], [0.03, 0.022, 0.018], 7, BLACK);      // 右后视镜的支杆                          // 内后视镜的支架
   }
   L1(new THREE.Mesh(GS.build(), toonMat({ vertexColors: true, smooth: true, rim: 0.25 })));
   L1(new THREE.Mesh(GH.build(), toonMat({ vertexColors: true, spec: 0.5 })));
@@ -236,7 +237,8 @@ export function buildCarView(scene, renderer, navCanvas) {
   };
   addMirror(0.28, 0.095, V(1.92, 1.455, 0.0), -(Math.PI / 2 + 0.22), V(-1.0, 1.3, 0), Math.PI / 2, 13, 768, 260, false);
   addMirror(0.23, 0.145, V(2.18, 1.085, -1.06), -1.22, V(2.2, 1.04, -1.08), Math.PI / 2 - 0.13, 17, 384, 240, true);
-  addMirror(0.23, 0.145, V(2.18, 1.085, 1.06), -2.09, V(2.2, 1.04, 1.08), Math.PI / 2 + 0.13, 17, 384, 240, true);
+  // 右镜：真车的位置在正前方视野外（偏右 54°），这里挪到引擎盖右前角上方（像翼子板后视镜），不用转头就能看到
+  addMirror(0.26, 0.16, V(2.72, 1.175, 0.97), -2.2, V(2.74, 1.15, 1.02), Math.PI / 2 + 0.13, 17, 384, 240, true);
 
   const camera = new THREE.PerspectiveCamera(58, 16 / 9, 0.08, 1800);
   scene.add(camera);
@@ -245,7 +247,7 @@ export function buildCarView(scene, renderer, navCanvas) {
 
   /** lookTarget：视线偏转角（弧度，右为正） */
   view.update = (car, lookTarget, dt) => {
-    root.position.set(car.x, 0, car.z); root.rotation.y = -car.h;
+    const cy = car.y || 0; root.position.set(car.x, cy, car.z); root.rotation.y = -car.h;
     wheel.rotation.z = -car.steer * 7.3;       // 约 1.2 圈打到底
     stalk.rotation.z += ((car.signal === 1 ? 0.22 : car.signal === -1 ? -0.22 : 0) - stalk.rotation.z) * Math.min(1, dt * 14 + 0.02);
     view.look += (lookTarget - view.look) * Math.min(1, dt * 9);
@@ -254,16 +256,16 @@ export function buildCarView(scene, renderer, navCanvas) {
     camera.up.set(0, 1, 0);
     if (view.mode === 'cockpit') {
       const lean = Math.sin(view.look) * 0.1, a = car.h + view.look;
-      camera.position.set(car.x + fx * EYE.x + rx * (EYE.z + lean), EYE.y, car.z + fz * EYE.x + rz * (EYE.z + lean));
-      tgt.set(camera.position.x + Math.cos(a), EYE.y - 0.02, camera.position.z + Math.sin(a)); camera.lookAt(tgt);
+      camera.position.set(car.x + fx * EYE.x + rx * (EYE.z + lean), cy + EYE.y, car.z + fz * EYE.x + rz * (EYE.z + lean));
+      tgt.set(camera.position.x + Math.cos(a), cy + EYE.y - 0.02, camera.position.z + Math.sin(a)); camera.lookAt(tgt);
       camera.layers.set(0); camera.layers.enable(1);
       if ((view.frame & 1) === 0) drawCluster(car, (performance.now() % 760) < 380);
     } else if (view.mode === 'chase') {
       const a = car.h + view.look;
-      camera.position.set(cx0 - Math.cos(a) * 8.5, 3.6, cz0 - Math.sin(a) * 8.5); tgt.set(cx0 + fx * 4, 1.0, cz0 + fz * 4); camera.lookAt(tgt);
+      camera.position.set(cx0 - Math.cos(a) * 8.5, cy + 3.6, cz0 - Math.sin(a) * 8.5); tgt.set(cx0 + fx * 4, cy + 1.0, cz0 + fz * 4); camera.lookAt(tgt);
       camera.layers.set(0); camera.layers.enable(2);
     } else {
-      camera.position.set(cx0 + fx * 6, 60, cz0 + fz * 6); camera.up.set(fx, 0, fz); tgt.set(cx0 + fx * 6, 0, cz0 + fz * 6); camera.lookAt(tgt);
+      camera.position.set(cx0 + fx * 6, cy + 60, cz0 + fz * 6); camera.up.set(fx, 0, fz); tgt.set(cx0 + fx * 6, cy, cz0 + fz * 6); camera.lookAt(tgt);
       camera.layers.set(0); camera.layers.enable(2);
     }
   };

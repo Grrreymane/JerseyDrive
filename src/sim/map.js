@@ -28,6 +28,14 @@ export function pointAt(seg, s, out = {}) {
   out.dx = (seg.px[i] - seg.px[i - 1]) / L; out.dz = (seg.pz[i] - seg.pz[i - 1]) / L;
   return out;
 }
+/** 路段上弧长 s 处的路面高度（高架和匝道才有，地面路是 0） */
+export function segY(seg, s) {
+  const ys = seg.ys; if (!ys) return 0;
+  const n = seg.n; let i = 1; s = Math.max(0, Math.min(seg.len, s));
+  while (i < n - 1 && seg.cum[i] < s) i++;
+  const L = seg.cum[i] - seg.cum[i - 1] || 1, t = (s - seg.cum[i - 1]) / L;
+  return ys[i - 1] + (ys[i] - ys[i - 1]) * t;
+}
 /** 路段上 (s, o) 处的世界坐标 */
 export function offsetPoint(seg, s, o, out = {}) {
   pointAt(seg, s, out); out.x += -out.dz * o; out.z += out.dx * o; return out;
@@ -76,7 +84,7 @@ export function prepareMap(raw) {
     const n = s.pts.length / 2, px = new Float64Array(n), pz = new Float64Array(n), cum = new Float64Array(n);
     for (let i = 0; i < n; i++) { px[i] = s.pts[2 * i]; pz[i] = s.pts[2 * i + 1]; if (i) cum[i] = cum[i - 1] + Math.hypot(px[i] - px[i - 1], pz[i] - pz[i - 1]); }
     const driveW = (s.lf + s.lb) * LANE_W;
-    return { ...s, n, px, pz, cum, len: cum[n - 1], driveW, halfW: driveW / 2 + s.park, cOff: -driveW / 2 + s.lb * LANE_W, trimA: 0, trimB: 0, ja: null, jb: null };
+    return { ...s, n, px, pz, cum, high: !!s.ys, len: cum[n - 1], driveW, halfW: driveW / 2 + s.park, cOff: -driveW / 2 + s.lb * LANE_W, trimA: 0, trimB: 0, ja: null, jb: null };
   });
   // ---------- 建筑索引：点到最近一栋楼外墙的距离（在楼里面为负） ----------
   const B = (raw.buildings || []).map((b, i) => {
@@ -129,7 +137,7 @@ export function prepareMap(raw) {
     return out;
   };
 
-  const juncs = raw.juncs.map(j => ({ ...j, legs: j.legs.map(l => ({ ...l })), offset: hash(j.id * 7 + 3) * CYCLE.total }));
+  const juncs = raw.juncs.map(j => ({ y: 0, ...j, legs: j.legs.map(l => ({ ...l })), offset: hash(j.id * 7 + 3) * CYCLE.total }));
   for (const j of juncs) {
     for (const l of j.legs) {
       const seg = segs[l.seg]; l.segRef = seg;
@@ -190,8 +198,8 @@ export function prepareMap(raw) {
 
   const map = { raw, segs, juncs, half: raw.half, origin: raw.origin, bldDist, buildings: B };
 
-  /** 最近的路段：返回 {seg, s, o, d, dx, dz}，d 是到中心线的距离 */
-  map.locate = (x, z, out = {}) => {
+  /** 最近的路段：返回 {seg, s, o, d, dx, dz, y}，d 是到中心线的距离。传了 y 就只在那一层找（高架和它下面的路在平面上是叠着的） */
+  map.locate = (x, z, out = {}, y) => {
     const list = segGrid.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
     out.seg = null; let best = 1e9;
     if (!list) return out;
@@ -199,7 +207,10 @@ export function prepareMap(raw) {
       const ax = s.px[i - 1], az = s.pz[i - 1], ex = s.px[i] - ax, ez = s.pz[i] - az, L2 = ex * ex + ez * ez || 1;
       let t = ((x - ax) * ex + (z - az) * ez) / L2; t = t < 0 ? 0 : t > 1 ? 1 : t;
       const qx = ax + ex * t, qz = az + ez * t, d = Math.hypot(x - qx, z - qz);
+      const sy = s.ys ? s.ys[i - 1] + (s.ys[i] - s.ys[i - 1]) * t : 0;
+      if (y !== undefined && Math.abs(sy - y) > 3) continue;
       if (d < best) {
+        out.y = sy;
         best = d; const L = Math.sqrt(L2);
         out.seg = s; out.s = s.cum[i - 1] + L * t; out.dx = ex / L; out.dz = ez / L;
         out.o = (x - ax) * (-ez / L) + (z - az) * (ex / L); out.d = d;
@@ -207,15 +218,15 @@ export function prepareMap(raw) {
     }
     return out;
   };
-  map.junctionAt = (x, z) => {
+  map.junctionAt = (x, z, y) => {
     const list = juncGrid.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
-    if (list) for (const j of list) if (Math.hypot(x - j.cx, z - j.cz) <= j.r + 0.01 && inConvex(j.poly, x, z)) return j;
+    if (list) for (const j of list) if ((y === undefined || Math.abs(j.y - y) < 3) && Math.hypot(x - j.cx, z - j.cz) <= j.r + 0.01 && inConvex(j.poly, x, z)) return j;
     return null;
   };
   const L0 = {};
-  map.onRoad = (x, z, margin = 0) => {
-    if (map.junctionAt(x, z)) return true;
-    const l = map.locate(x, z, L0); if (!l.seg) return false;
+  map.onRoad = (x, z, margin = 0, y) => {
+    if (map.junctionAt(x, z, y)) return true;
+    const l = map.locate(x, z, L0, y); if (!l.seg) return false;
     return Math.abs(l.o) <= l.seg.halfW + margin && l.s >= l.seg.trimA - 0.5 && l.s <= l.seg.len - l.seg.trimB + 0.5 && l.d <= l.seg.halfW + margin;
   };
   map.legOf = (j, seg, end) => j ? j.legs.find(l => l.segRef === seg && l.end === end) : null;
@@ -250,15 +261,15 @@ export function prepareMap(raw) {
   };
 
   /** 把车摆回最近的车道中央。返回 {x,z,h}（后轴位置） */
-  map.snapToLane = (x, z, h) => {
-    const l = map.locate(x, z, {}); if (!l.seg) return null;
+  map.snapToLane = (x, z, h, y) => {
+    const l = map.locate(x, z, {}, y); if (!l.seg) return null;
     const seg = l.seg; let fwd = Math.cos(h) * l.dx + Math.sin(h) * l.dz >= 0;
     if (!fwd && seg.lb === 0) fwd = true;
     const n = fwd ? seg.lf : seg.lb;
     const s = Math.max(seg.trimA + 8, Math.min(seg.len - seg.trimB - 8, l.s));
     const q = offsetPoint(seg, s, laneCenter(seg, fwd, n - 1), {});
     const hh = Math.atan2(q.dz, q.dx) + (fwd ? 0 : Math.PI);
-    return { x: q.x - Math.cos(hh) * CAR.center, z: q.z - Math.sin(hh) * CAR.center, h: hh };
+    return { x: q.x - Math.cos(hh) * CAR.center, z: q.z - Math.sin(hh) * CAR.center, h: hh, y: segY(seg, s) };
   };
   return map;
 }

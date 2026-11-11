@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { prepareMap, signalState, laneCenter, offsetPoint, pointAt, CAR } from './sim/map.js';
+import { prepareMap, signalState, laneCenter, offsetPoint, pointAt, segY, CAR } from './sim/map.js';
 import { makeCar, stepCar, setSignal, shift, carCenter, MPH, GEARS } from './sim/car.js';
 import { makeTraffic, stepTraffic } from './sim/traffic.js';
 import { buildActors } from './view/actors.js';
@@ -65,7 +65,7 @@ const startPose = (() => {
   const h = Math.atan2(q.dz, q.dx);
   return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h };
 })();
-function placeCar(p) { Object.assign(S.car, { x: p.x, z: p.z, h: p.h, v: 0, steer: 0 }); clearTransient(S.R); S.R.needReset = null; }
+function placeCar(p) { Object.assign(S.car, { x: p.x, z: p.z, h: p.h, y: p.y || 0, v: 0, steer: 0 }); clearTransient(S.R); S.R.needReset = null; }
 function restart() { S.crash = null; $('hit').classList.remove('on'); S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; T = makeTraffic(map); placeCar(startPose); $('toasts').innerHTML = ''; }
 restart();
 
@@ -212,7 +212,7 @@ function drawMini() {
   mc.beginPath(); mc.moveTo(0, -16); mc.lineTo(11, 13); mc.lineTo(0, 6); mc.lineTo(-11, 13); mc.closePath(); mc.fill(); mc.stroke();
   // 屏幕顶上一条：路名 + 限速
   mc.setTransform(1, 0, 0, 1, 0, 0); mc.fillStyle = 'rgba(10,14,20,0.82)'; mc.fillRect(0, 0, W, 46);
-  mc.fillStyle = '#e8edf3'; mc.font = '600 24px Arial, sans-serif'; mc.textBaseline = 'middle'; mc.textAlign = 'left'; mc.fillText(S.R.cur ? shortName(S.R.cur.street || '') : '', 16, 24);
+  mc.fillStyle = '#e8edf3'; mc.font = '600 24px Arial, sans-serif'; mc.textBaseline = 'middle'; mc.textAlign = 'left'; mc.fillText(S.R.cur ? shortName(S.R.cur.street || '') : '', 16, 24, W - 210);
   mc.textAlign = 'right'; mc.fillStyle = '#9fb0c4'; mc.fillText('限速 ' + (S.R.cur?.seg.speed || 25) + ' mph', W - 16, 24);
   view.navTex.needsUpdate = true;
   // 车外视角没有中控屏：把同一张图裁成圆形小地图显示在右下角
@@ -270,7 +270,7 @@ function resize() {
 addEventListener('resize', resize); resize();
 
 const PC = {};
-function stepActors(dt) { const c = S.car, A = S.R.A; carCenter(c, PC); stepTraffic(T, { x: PC.x, z: PC.z, h: c.h, v: c.v, cur: S.R.cur, stopT: A && A.stopped ? A.stopT : -1 }, S.t, dt); }
+function stepActors(dt) { const c = S.car, A = S.R.A; carCenter(c, PC); stepTraffic(T, { x: PC.x, z: PC.z, y: c.y || 0, h: c.h, v: c.v, cur: S.R.cur, stopT: A && A.stopped ? A.stopT : -1 }, S.t, dt); }
 function simStep(lookT) {
   stepCar(S.car, inp, DT);
   if (trafficOn) stepActors(DT);
@@ -291,7 +291,7 @@ function simStep(lookT) {
 function doReset() {
   {
     const flip = S.R.needReset.flip, c = S.car, back = S.R.needReset.back ? 9 : 0;      // 撞了车或人：退回去 9 米，并把贴得太近的车清掉
-    const p = map.snapToLane(c.x + Math.cos(c.h) * (CAR.center - back), c.z + Math.sin(c.h) * (CAR.center - back), c.h + (flip ? Math.PI : 0)) || startPose;
+    const p = map.snapToLane(c.x + Math.cos(c.h) * (CAR.center - back), c.z + Math.sin(c.h) * (CAR.center - back), c.h + (flip ? Math.PI : 0), c.y || 0) || startPose;
     if (back) T.cars = T.cars.filter(o => Math.hypot(o.x - p.x, o.z - p.z) > 16);
     placeCar(p); const f = $('flash'); f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on')));
   }
@@ -430,7 +430,7 @@ function findStart(kind) {
     for (const s of map.segs) { if (s.speed < 35 || s.useLen < 220) continue; const d = Math.hypot(s.px[0], s.pz[0]); if (d < bd) { bd = d; best = s; } }
     if (!best) return startPose;
     const q = offsetPoint(best, best.trimA + 20, laneCenter(best, true, best.lf - 1), {}), h = Math.atan2(q.dz, q.dx);
-    return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h };
+    return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h, y: segY(best, best.trimA + 20) };
   }
   for (const j of map.juncs) {
     if (kind === 'allway' ? j.control !== 'allway' : j.control !== 'signal') continue;
@@ -534,3 +534,10 @@ function drawBig() {
 }
 window.__jd.toggleBig = toggleBig; window.__jd.startLesson = startLesson;
 window.__jd.traffic = () => T;
+// 调试 / 截图：把车放到最长的一段高架中间（?spot=highway）
+window.__jd.toHighway = (ramp) => {
+  const g = ramp ? map.segs.filter(x => x.high && Math.min(...x.ys) < 0.3 && Math.max(...x.ys) > 6 && x.len > 120).sort((a, b) => a.len - b.len)[0] : map.segs.filter(x => x.high && x.ys.every(v => v > 7)).sort((a, b) => b.len - a.len)[0]; if (!g) return null;
+  const u = ramp ? (g.ys[0] < 1 ? 30 : g.len - 110) : g.len * 0.4, q = offsetPoint(g, u, laneCenter(g, true, g.lf - 1), {}), h = Math.atan2(q.dz, q.dx);
+  placeCar({ x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h, y: segY(g, u) }); S.car.gear = 'D'; return g.name;
+};
+if (params.get('spot') === 'highway') { window.__jd.freeze = null; window.__jd.toHighway(params.has('ramp')); $('hud').style.display = ''; }
