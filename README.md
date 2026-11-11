@@ -144,3 +144,8 @@ node tools/cdp.mjs "http://127.0.0.1:8765/?style=cel&fly&v=8&len=260&q=0" --vide
 - 街区风格（`buildings.js` 的 `DISTRICTS`）：按经纬度分片区定挂板 / 砖 / 抹灰的比例和砖的色板。JC 市中心和 Hoboken 以褐石、深红砖为主，Heights、JSQ 以西、Kearny、Newark 住宅区以挂板房为主，水边多抹灰和玻璃。
 - 曼哈顿天际线（`sky.js` 的 `buildSkyline`）：河对岸一面南北向的剪影布景，摆在真实方位，主要高楼按真实高度画；越往西越淡，到 Newark 看不见。水面在地图东边往外多铺 900 米。
 
+### 第十轮：地标、清理叠在一起的模型
+
+- 地标（`src/view/landmarks.js`，照公开照片手工搭）：Colgate 大钟（Paulus Hook 水边，朝东）、Pulaski Skyway 过 Hackensack / Passaic 两段的悬臂钢桁架（按水面栅格自动找过河段）、Journal Square 的 Loew's Jersey 剧院立面（贴在那栋楼朝街的墙前面）、Grove St 的 PATH 站入口亭。位置写经纬度，摆之前避开路、楼和水。加新地标就在这个文件里加一段。
+- 叠在一起会闪的东西：① `build_map.mjs` 删掉大半落在别的楼里面的轮廓（42 个；明显更高的当裙楼上的塔楼留下，轮廓内缩 0.25 米）；② `sim/map.js` 路边停的车不再和别的路停的车重叠，也不停进旁边另一条路的车道；③ 高架桥面分三组网格用不同的深度偏移（并行的两幅路、匝道汇入处桥面共面），护栏压在旁边桥面上的那一侧不立。
+

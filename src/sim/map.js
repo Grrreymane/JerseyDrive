@@ -234,6 +234,7 @@ export function prepareMap(raw) {
 
   // ---------- 路边停的车（确定性生成），顺便建碰撞网格 ----------
   const parked = [], parkGrid = new Map();
+  const pkCell = new Map(), PKL = {};
   for (const s of segs) {
     if (s.park < 2 || s.useLen < 34) continue;
     const pad = (j) => (j && j.control !== 'joint') ? STOP_LINE + 8 : 2;       // 人行横道前 25 英尺内不能停车
@@ -246,6 +247,10 @@ export function prepareMap(raw) {
         const q = offsetPoint(s, u, side * (s.halfW - 1.15) + (hash(k + s.id) - 0.5) * 0.16, {});
         const faceFwd = side > 0 || s.oneway;
         const car = { x: q.x, z: q.z, h: Math.atan2(q.dz, q.dx) + (faceFwd ? 0 : Math.PI), L: 4.3 + hash(k * 3 + s.id) * 0.5, W: 1.8, c: Math.floor(hash(k * 5 + s.id * 3) * 8), seg: s.id };
+        // 两条路挨得很近时（分隔的双向路、斜着汇入的小路），各自路边的车会停到同一个位置或者停进另一条路的车道里：这种不放
+        { const kx = Math.floor(car.x / 3), kz = Math.floor(car.z / 3); let hit = false; for (let a = -1; a <= 1 && !hit; a++) for (let b = -1; b <= 1 && !hit; b++) for (const o of pkCell.get((kx + a) + ',' + (kz + b)) || []) if (Math.hypot(o.x - car.x, o.z - car.z) < 2.6) { hit = true; break; }
+          if (!hit) { const l = map.locate(car.x, car.z, PKL); hit = !!l.seg && l.seg !== s && l.d < l.seg.halfW - 2.4; }
+          if (hit) continue; const kk = kx + ',' + kz; (pkCell.get(kk) || pkCell.set(kk, []).get(kk)).push(car); }
         parked.push(car); put(parkGrid, car.x - 3, car.z - 3, car.x + 3, car.z + 3, car);
       }
     }

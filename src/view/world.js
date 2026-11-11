@@ -6,6 +6,7 @@ import { Geo, ChunkGeo, lin } from './geo.js';
 import { carModel, carModelLow, treeModel, treePit, TREE_KINDS, lampPost, hydrant } from './models.js';
 import { toonMat } from './toon.js';
 import { buildBuildings } from './buildings.js';
+import { buildLandmarks } from './landmarks.js';
 export { Geo };
 
 
@@ -233,6 +234,8 @@ export function buildWorld(map, scene) {
       for (let i = 0; i <= n; i++) { const u = sA + (sB - sA) * i / n; pointAt(seg, u, P); out.push({ x: P.x, z: P.z, rx: -P.dz, rz: P.dx, y: drawY(segY(seg, u)), u }); }
       return out;
     };
+    // 桥面单独分成几组网格，各用不同的深度偏移：并行的两幅路、匝道汇入的地方桥面是叠着的，同一高度的两层面不错开就会闪
+    const GbD = [new ChunkGeo(), new ChunkGeo(), new ChunkGeo()], GbJ = new ChunkGeo(), LB = {};
     const pt = (r, o, dy = 0) => [r.x + r.rx * o, r.y + dy, r.z + r.rz * o];
     const band = (G, a, b, o0, o1, dy, col) => G.quadN([pt(a, o0, dy), pt(a, o1, dy), pt(b, o1, dy), pt(b, o0, dy)], [UPN, UPN, UPN, UPN], col);
     for (const s of map.segs) {
@@ -240,8 +243,9 @@ export function buildWorld(map, scene) {
       const r = fine(s, Math.max(0, s.trimA - 0.3), Math.min(s.len, s.len - s.trimB + 0.3)), w = s.halfW;
       for (let i = 1; i < r.length; i++) {
         const a = r[i - 1], b = r[i], hi = Math.min(a.y, b.y);
-        band(Gb, a, b, -w, w, 0, DECK);
+        band(GbD[s.id % 3], a, b, -w, w, 0, DECK);
         if (hi > 0.5) for (const sg of [-1, 1]) {      // 护栏（新泽西护栏的截面：下宽上窄）+ 桥面侧面
+          { const q = pt(a, sg * (w + 0.3)), l = map.locate(q[0], q[2], LB, a.y); if (l.seg && l.seg !== s && l.seg.high && l.d < l.seg.halfW - 0.2) continue; }      // 这一侧压在旁边另一幅桥面上（并行、汇入）：不立护栏，不然护栏横在路中间
           const n = [a.rx * sg, 0, a.rz * sg], ni = [-n[0], 0, -n[2]], o0 = sg * w, o1 = sg * (w + 0.18), o2 = sg * (w + 0.42), bh = Math.min(0.85, hi * 0.6), th = Math.min(TH, hi);
           Gb.quadN([pt(a, o0, 0), pt(b, o0, 0), pt(b, o1, bh), pt(a, o1, bh)], [ni, ni, ni, ni], CONC);
           Gb.quadN([pt(a, o1, bh), pt(b, o1, bh), pt(b, o2, bh), pt(a, o2, bh)], [UPN, UPN, UPN, UPN], CONC);
@@ -271,10 +275,12 @@ export function buildWorld(map, scene) {
     }
     for (const j of map.juncs) {      // 高架上的分流 / 合流口
       if (j.y <= 0.3) continue; const p = j.poly, y = j.y + LIFT;
-      for (let i = 1; i < p.length - 1; i++) Gb.flat(p[0][0], p[0][1], p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], p[i + 1][0], p[i + 1][1], y, DECK);
+      for (let i = 1; i < p.length - 1; i++) GbJ.flat(p[0][0], p[0][1], p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], p[i + 1][0], p[i + 1][1], y, DECK);
       if (j.y > 1.2) for (let i = 1; i < p.length - 1; i++) Gb.quadN([[p[0][0], y - TH, p[0][1]], [p[i][0], y - TH, p[i][1]], [p[i + 1][0], y - TH, p[i + 1][1]], [p[i + 1][0], y - TH, p[i + 1][1]]], [DN, DN, DN, DN], CONC_D);
     }
     add(Gb.build(), toonMat({ vertexColors: true }), 0, true);
+    add(GbJ.build(), toonMat({ vertexColors: true }), 0, true);
+    GbD.forEach((g, k) => add(g.build(), toonMat({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: k + 1, polygonOffsetUnits: k + 1 }), 0, true));
     add(Gbm.build(), toonMat({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
   }
 
@@ -395,6 +401,7 @@ export function buildWorld(map, scene) {
 
   // ---------- 分块 + 远近两套模型 ----------
   const CELLSZ = 120; world.lod = [];
+  for (const L of buildLandmarks(map, raised, occupy)) world.lod.push({ x: L.x, z: L.z, hi: [], lo: [], near: null, gone: null, r: 0, far: L.far, g: L.g });      // 地标
   const cellsOf = (items) => { const m = new Map(); for (const it of items) { const k = Math.floor(it.x / CELLSZ) + ',' + Math.floor(it.z / CELLSZ); let a = m.get(k); if (!a) m.set(k, a = []); a.push(it); } return [...m.values()]; };
   const inst = (list, geo, mat, fill, parent = raised) => {
     const m = new THREE.InstancedMesh(geo, mat, list.length); list.forEach((it, i) => fill(m, it, i));

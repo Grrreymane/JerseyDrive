@@ -309,6 +309,28 @@ for (const w of ways) {
     const pts = polyOf(w); if (pts.length >= 3) parks.push(pts.flatMap(p => [r2(p[0]), r2(p[1])]));
   }
 }
+// 叠在一起的楼：OSM 里同一个位置常有两个轮廓（重复画的、大楼里又画了一块、裙楼上的塔楼）。两个模型叠着，共面的墙和屋顶会闪。
+// 小的那个大半落在大的里面：不比大的高出一截就删掉（名字、门牌并给大的）；明显更高的是裙楼上的塔楼，留着，轮廓往里缩一点避开共面
+{
+  const CELL = 80, grid = new Map(), key = (x, z) => Math.floor(x / CELL) + ',' + Math.floor(z / CELL);
+  buildings.forEach((b, i) => { b.i = i; const k = key(b.cx, b.cz); (grid.get(k) || grid.set(k, []).get(k)).push(b); });
+  const order = buildings.slice().sort((p, q) => p.rr - q.rr); let nDrop = 0, nShrink = 0;
+  for (const S of order) {
+    const samples = [[S.cx, S.cz], ...S.poly, ...S.poly.map((p, i) => { const q = S.poly[(i + 1) % S.poly.length]; return [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]; })];
+    let host = null;
+    for (let i = -3; i <= 3 && !host; i++) for (let j = -3; j <= 3 && !host; j++) for (const B of grid.get(key(S.cx + i * CELL, S.cz + j * CELL)) || []) {
+      if (B === S || B.dead || B.rr < S.rr || (B.rr === S.rr && B.i < S.i) || Math.hypot(B.cx - S.cx, B.cz - S.cz) > B.rr * 1.5 + 20) continue;
+      let n = 0; for (const p of samples) if (inPoly(B.poly, p[0], p[1])) n++;
+      if (n >= samples.length * 0.4) { host = B; break; }
+    }
+    if (!host) continue;
+    if (S.h > host.h + 3) { S.poly = S.poly.map(p => { const dx = p[0] - S.cx, dz = p[1] - S.cz, l = Math.hypot(dx, dz) || 1; return [p[0] - dx / l * 0.25, p[1] - dz / l * 0.25]; }); S.pts = S.poly.flatMap(p => [r2(p[0]), r2(p[1])]); nShrink++; continue; }
+    S.dead = true; nDrop++; if (S.no && !host.no) host.no = S.no; if (S.n && !host.n) host.n = S.n; if (S.nm) host.nm = [...new Set([...(host.nm || []), ...S.nm])].slice(0, 5);
+  }
+  for (let i = buildings.length - 1; i >= 0; i--) if (buildings[i].dead) buildings.splice(i, 1);
+  for (const b of buildings) delete b.i;
+  console.log(`overlapping buildings: removed ${nDrop}, towers on podiums kept ${nShrink}`);
+}
 // 店铺、机构、门牌这些“点”：落在哪栋楼里就归哪栋；不在楼里的归 14 米内最近的楼
 {
   const CELL = 80, grid = new Map(), key = (x, z) => Math.floor(x / CELL) + ',' + Math.floor(z / CELL);
