@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { LANE_W, XWALK_NEAR, XWALK_FAR, STOP_LINE, pointAt, offsetPoint, signalState, hash } from '../sim/map.js';
 import { makeSignAtlas, makeNameAtlas } from './signs.js';
-import { Geo, lin } from './geo.js';
+import { Geo, ChunkGeo, lin } from './geo.js';
 import { carModel, carModelLow, treeModel, treePit, TREE_KINDS, lampPost, hydrant } from './models.js';
 import { toonMat } from './toon.js';
 import { buildBuildings } from './buildings.js';
@@ -54,7 +54,15 @@ export function buildWorld(map, scene) {
   scene.add(world.group);
   // 人行道比路面高一个路缘（15 厘米）：建筑、杆子、树都放在这个抬高的组里
   const CH = 0.15, raised = new THREE.Group(); raised.position.y = CH; world.group.add(raised);
-  const add = (geo, mat, order = 0, cast = false) => { const m = new THREE.Mesh(geo, mat); m.renderOrder = order; m.matrixAutoUpdate = false; m.frustumCulled = false; m.receiveShadow = true; m.castShadow = cast; world.group.add(m); return m; };
+  // 分块几何：每块一个网格、各自做视锥剔除；全部登记进 chunks，太远的整块关掉
+  const chunks = [];
+  const add = (geo, mat, order = 0, cast = false) => {
+    if (Array.isArray(geo)) {
+      const g = new THREE.Group(); world.group.add(g);
+      for (const c of geo) { const m = new THREE.Mesh(c.geo, mat); m.renderOrder = order; m.matrixAutoUpdate = false; m.receiveShadow = true; m.castShadow = cast; g.add(m); chunks.push({ x: c.x, z: c.z, m, on: true }); }
+      return g;
+    }
+    const m = new THREE.Mesh(geo, mat); m.renderOrder = order; m.matrixAutoUpdate = false; m.frustumCulled = false; m.receiveShadow = true; m.castShadow = cast; world.group.add(m); return m; };
   const DS = THREE.DoubleSide;
 
   // ---------- 地面（人行道 / 街区）：浅色方砖 ----------
@@ -78,7 +86,7 @@ export function buildWorld(map, scene) {
 
   // ---------- 路面 + 路口 + 公园 ----------
   const texAsphalt = canvasTex(256, speckle('#666c78', 0.08, 5000));      // 偏蓝的灰
-  const Groad = new Geo(), Gpark = new Geo();
+  const Groad = new ChunkGeo(), Gpark = new ChunkGeo();
   for (const s of map.segs) {
     const v = 0.93 + hash(s.id) * 0.12;
     strip(Groad, s, s.trimA - 0.05, s.len - s.trimB + 0.05, -s.halfW, s.halfW, 0, [v, v, v], 1 / 5);
@@ -98,7 +106,7 @@ export function buildWorld(map, scene) {
   add(Gpark.build(), toonMat({ map: canvasTex(128, speckle('#ffffff', 0.12, 1500)), vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -25);
 
   // ---------- 标线 ----------
-  const Gw = new Geo(), Gy = new Geo(), W = [0.97, 0.97, 0.97], Y = lin('#ffc61a');
+  const Gw = new ChunkGeo(), Gy = new ChunkGeo(), W = [0.97, 0.97, 0.97], Y = lin('#ffc61a');
   const ctl = (j) => j && (j.control === 'signal' || j.control === 'stop' || j.control === 'allway');
   for (const s of map.segs) {
     if (s.useLen < 6) continue;
@@ -122,7 +130,7 @@ export function buildWorld(map, scene) {
   add(Gy.build(), toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -10);
 
   // ---------- 路缘石：立面略带斜度 + 倒角 + 顶面 ----------
-  const Gc = new Geo(), Gtac = new Geo(), CURB = lin('#d9d6cf'), CURB_D = lin('#c2bfb8');
+  const Gc = new ChunkGeo(), Gtac = new ChunkGeo(), CURB = lin('#d9d6cf'), CURB_D = lin('#c2bfb8');
   const curbRun = (ax, az, bx, bz, nx, nz) => {    // n 指向人行道一侧
     const P = (x, z, d, y) => [x + nx * d, y, z + nz * d], f = [-nx * 0.98, 0.2, -nz * 0.98], c = [-nx * 0.64, 0.77, -nz * 0.64], u = [0, 1, 0];
     Gc.quadN([P(ax, az, 0, 0), P(bx, bz, 0, 0), P(bx, bz, 0.022, CH - 0.04), P(ax, az, 0.022, CH - 0.04)], [f, f, f, f], CURB_D);
@@ -160,7 +168,7 @@ export function buildWorld(map, scene) {
   add(Gc.build(), toonMat({ vertexColors: true }));
   // 路边的排水沟（一条浅色混凝土带）、雨水篦子、井盖 —— 都是贴在路面上的薄片
   {
-    const Gg = new Geo(), Gd = new Geo(), GUT = lin('#9a9c9f'), IRON = [0.07, 0.07, 0.08], IRON_L = [0.2, 0.2, 0.22], P = {};
+    const Gg = new ChunkGeo(), Gd = new ChunkGeo(), GUT = lin('#9a9c9f'), IRON = [0.07, 0.07, 0.08], IRON_L = [0.2, 0.2, 0.22], P = {};
     for (const s of map.segs) {
       if (s.useLen < 2) continue; const s0 = s.trimA, s1 = s.len - s.trimB;
       strip(Gg, s, s0, s1, s.halfW - 0.34, s.halfW, 0, GUT); strip(Gg, s, s0, s1, -s.halfW, -s.halfW + 0.34, 0, GUT);
@@ -193,7 +201,7 @@ export function buildWorld(map, scene) {
   const atlas = makeSignAtlas(256);
   const names = [...new Set(map.segs.map(s => s.name).filter(Boolean))];
   const nameAtlas = makeNameAtlas(names);
-  const Gs = new Geo(), Gn = new Geo(), Gm = new Geo(), Ga = new Geo();
+  const Gs = new ChunkGeo(), Gn = new ChunkGeo(), Gm = new ChunkGeo(), Ga = new ChunkGeo();
   const METAL = lin('#9aa3ad'), DARK = lin('#2a2d33'), BACK = lin('#b4bac0'), YELLOW = lin('#f2b632');
   // 竖着的牌子：中心 (x,y,z)，正面朝 (fx,fz)
   const board = (G, x, y, z, fx, fz, w, h, uv) => {
@@ -313,6 +321,7 @@ export function buildWorld(map, scene) {
   world.stream = (x, z) => bld.ensure(x, z, 3);
   world.updateLod = (x, z) => {
     if (first) { bld.ensure(x, z, 1e9); first = false; }
+    for (const c of chunks) { const on = Math.hypot(c.x - x, c.z - z) < (c.on ? 900 : 860); if (on !== c.on) { c.on = on; c.m.visible = on; } }
     for (const c of world.lod) {
       const d = Math.hypot(c.x - x, c.z - z), near = d < (c.near ? c.r + 20 : c.r), gone = d > (c.gone ? c.far - 30 : c.far);
       if (gone !== c.gone) { c.gone = gone; c.g.visible = !gone; }

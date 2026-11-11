@@ -21,7 +21,12 @@ const DT = 1 / 60;
 // ---------- 场景 ----------
 const canvas = $('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: params.has('rec') });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// 内部渲染分辨率封顶：高度不超过约 1200 像素（4K / 高分屏按原始分辨率画，显卡要多干好几倍的活，画面却看不出多少差别）
+let prScale = 1;
+// 画面固定 16:9：窗口不是这个比例时上下或左右留黑边。这样无论什么屏幕，看到的范围（仪表、后视镜、路口两侧）都一样
+const stage = () => { const w = Math.min(innerWidth, innerHeight * 16 / 9), h = w * 9 / 16; return { w: Math.round(w), h: Math.round(h), x: Math.round((innerWidth - w) / 2), y: Math.round((innerHeight - h) / 2) }; };
+const pickPR = () => Math.min(devicePixelRatio, 2, 1200 / Math.max(600, stage().h)) * prScale;
+renderer.setPixelRatio(pickPR());
 const scene = new THREE.Scene();
 const sky = buildSky(scene, renderer);
 const post = buildPost(renderer);
@@ -259,7 +264,9 @@ function openBook() {
 }
 
 // ---------- 主循环 ----------
-function resize() { const w = innerWidth, h = innerHeight, pr = renderer.getPixelRatio(); renderer.setSize(w, h, false); view.resize(w, h); post.setSize(Math.round(w * pr), Math.round(h * pr)); post.setStyle(STYLES[styleIdx]); }
+function resize() {
+  const st = stage(); for (const id of ['gl', 'hud']) { const e = $(id).style; e.left = st.x + 'px'; e.top = st.y + 'px'; e.width = st.w + 'px'; e.height = st.h + 'px'; e.right = e.bottom = 'auto'; }
+  renderer.setPixelRatio(pickPR()); const w = st.w, h = st.h, pr = renderer.getPixelRatio(); renderer.setSize(w, h, false); view.resize(w, h); post.setSize(Math.round(w * pr), Math.round(h * pr)); post.setStyle(STYLES[styleIdx]); }
 addEventListener('resize', resize); resize();
 
 const PC = {};
@@ -306,8 +313,11 @@ function flyStep(dt) {
 }
 // 自动画质：连续两秒平均帧时间超过 24 ms 就降一档（1 = 降分辨率，2 = 再关阴影）。地址加 ?q=0 固定最高画质
 let quality = 0, ftSum = 0, ftN = 0; const qualityLocked = params.has('q');
-function lowerQuality() { quality++; if (quality >= 1) renderer.setPixelRatio(1); if (quality >= 2) sky.setShadows(false); resize(); }
+function lowerQuality() { quality++; if (quality >= 1) prScale = 0.75; if (quality >= 2) sky.setShadows(false); resize(); }
+// 限帧：最多 60 帧（高刷屏上不限的话会按 144 / 240 帧全速跑，风扇狂转）；暂停、菜单、开着大地图时降到 15 帧
+const uncapped = params.has('bench') || params.has('nocap'); let lastDraw = 0;
 function tick(now) {
+  if (!uncapped) { const idle = !S.fly && (!S.running || S.paused), gap = idle ? 1000 / 15 : 1000 / 60; if (now - lastDraw < gap - 1.5) { requestAnimationFrame(tick); return; } lastDraw = now; }
   const dt = Math.max(0, Math.min(0.1, (now - prev) / 1000)); prev = now;
   if (window.__jd.freeze) { window.__jd.freeze(); requestAnimationFrame(tick); return; }      // 调试：停住画面，手动摆镜头截图
   if (S.fly) flyStep(dt);
@@ -319,13 +329,13 @@ function tick(now) {
     lookT = readInput(dt); acc += dt;
     while (acc >= DT) { simStep(); acc -= DT; }
   } else S.t += dt * (S.running ? 0 : 1);       // 开始界面上红绿灯照常走
-  world.updateSignals(S.t);
+  if (frame % 4 === 0) world.updateSignals(S.t);
   view.update(S.car, lookT, dt);
   audio.engine(S.running && !S.paused ? S.car : null);
   if (S.running) { updateHud(); if (frame % 3 === 0) drawMini(); if (frame % 10 === 0) lessonTick(); }
   if (frame % 6 === 0) world.updateLod(S.car.x, S.car.z);
   world.stream(S.car.x, S.car.z);
-  sky.update(view.camera, S.car.x, S.car.z);
+  sky.update(view.camera, S.car.x, S.car.z, (frame & 1) === 0);
   if (trafficOn) actors.update(T, S.t);
   view.renderMirrors(); post.render(scene, view.camera);
   frame++; requestAnimationFrame(tick);
@@ -343,6 +353,8 @@ if (params.has('clay')) {
   });
 }
 world.updateLod(S.car.x, S.car.z); view.update(S.car, 0, 0); sky.update(view.camera, S.car.x, S.car.z); post.render(scene, view.camera);
+// 场景里几千个物体绝大多数不动：关掉每次渲染前的全场景矩阵刷新，会动的（自己的车、镜头、太阳）各自手动刷新
+scene.updateMatrixWorld(true); scene.matrixWorldAutoUpdate = false;
 $('btnStart').disabled = false; $('btnStart').textContent = '开始练车（Enter）';
 if (params.has('autostart')) start();
 requestAnimationFrame(tick);

@@ -75,7 +75,7 @@ export function buildPost(renderer) {
   P.setStyle = (st) => { U.lineW.value = st.line.w * Math.max(1, (P.h || 900) / 900); P.baseW = st.line.w; U.lineK.value = P.outline ? st.line.k : 0; U.crease.value = st.line.crease; U.ink.value.setRGB(...st.line.ink); U.aoK.value = st.ao || 0; U.sat.value = st.sat; U.contrast.value = st.contrast; U.halftone.value = st.halftone; };
   P.render = (scene, camera) => {
     if (!P.enabled) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
-    U.near.value = camera.near; U.far.value = camera.far; { const t = Math.tan(camera.fov * Math.PI / 360); U.tanH.value.set(t * camera.aspect, t); } U.pixAngle.value = 2 * Math.tan(camera.fov * Math.PI / 360) / (P.h || 900);
+    camera.updateMatrixWorld(); U.near.value = camera.near; U.far.value = camera.far; { const t = Math.tan(camera.fov * Math.PI / 360); U.tanH.value.set(t * camera.aspect, t); } U.pixAngle.value = 2 * Math.tan(camera.fov * Math.PI / 360) / (P.h || 900);
     U.lineW.value = (P.baseW || 1.2) * Math.max(1, (P.h || 900) / 900);
     renderer.setRenderTarget(rt); renderer.render(scene, camera);
     renderer.setRenderTarget(null); renderer.render(pscene, pcam);

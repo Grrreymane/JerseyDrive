@@ -231,7 +231,7 @@ export function buildCarView(scene, renderer, navCanvas) {
     frame.position.copy(pos).addScaledVector(nrm, -0.003); frame.rotation.y = yaw;
     const shell = L1(new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12), paint ? shellPaint : shellDark));
     shell.scale.set(w * 0.57, h * 0.64, paint ? 0.07 : 0.028); shell.position.copy(pos).addScaledVector(nrm, paint ? -0.076 : -0.033); shell.rotation.y = yaw;
-    const cam = new THREE.PerspectiveCamera(fov, rw / rh, 0.3, 420); cam.position.copy(camPos); cam.rotation.y = camYaw; root.add(cam);
+    const cam = new THREE.PerspectiveCamera(fov, rw / rh, 0.3, 230); cam.position.copy(camPos); cam.rotation.y = camYaw; root.add(cam);
     mirrors.push({ rt, cam, mesh });
   };
   addMirror(0.28, 0.095, V(1.92, 1.455, 0.0), -(Math.PI / 2 + 0.22), V(-1.0, 1.3, 0), Math.PI / 2, 13, 768, 260, false);
@@ -268,7 +268,7 @@ export function buildCarView(scene, renderer, navCanvas) {
     }
   };
   view.renderMirrors = () => {
-    view.frame++;
+    view.frame++; root.updateMatrixWorld(true); camera.updateMatrixWorld();
     if (view.mode !== 'cockpit') return;
     // 每帧只重画一面镜子：中、左、中、右轮流（镜子里的画面是整场景再画一遍，最费）
     const m = mirrors[[0, 1, 0, 2][view.frame & 3]]; renderer.setRenderTarget(m.rt); renderer.render(scene, m.cam);

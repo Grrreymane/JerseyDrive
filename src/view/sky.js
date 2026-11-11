@@ -55,13 +55,14 @@ export function buildSky(scene, renderer) {
       paintSky(st.sky, st.cloud);
       scene.background.set(st.sky[2]); scene.fog.color.set(st.sky[2]);
     },
-    update(camera, fx, fz) {
+    /** shadow = 这一帧要不要重画阴影图（隔帧画就够了） */
+    update(camera, fx, fz, shadow = true) {
       dome.position.copy(camera.position);
       p.set(fx, 0, fz);
       const a = Math.round(p.dot(right) / texel) * texel, b = Math.round(p.dot(upL) / texel) * texel, d = p.dot(dir);
       p.set(0, 0, 0).addScaledVector(right, a).addScaledVector(upL, b).addScaledVector(dir, d);
-      sun.target.position.copy(p); sun.position.copy(p).addScaledVector(dir, 480); sun.target.updateMatrixWorld();
-      renderer.shadowMap.needsUpdate = true;
+      sun.target.position.copy(p); sun.position.copy(p).addScaledVector(dir, 480); sun.target.updateMatrixWorld(); sun.updateMatrixWorld(); dome.updateMatrixWorld();
+      if (shadow) renderer.shadowMap.needsUpdate = true;
     },
   };
 }

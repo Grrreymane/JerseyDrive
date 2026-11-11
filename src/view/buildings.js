@@ -319,7 +319,7 @@ export function buildBuildings(map, group, occupy, isFree) {
       if (!ALWAYS.has(name)) hi.push(m);
     }
     for (const m of hi) m.visible = false;
-    group.add(g); c.g = g; c.hi = hi; c.lo = lo; c.built = true; c.near = false;
+    group.add(g); g.updateMatrixWorld(true); c.g = g; c.hi = hi; c.lo = lo; c.built = true; c.near = false;
     return done + 4;
   };
   const dropCell = (c) => {

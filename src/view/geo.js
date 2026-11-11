@@ -155,4 +155,17 @@ export class Geo {
   }
   get tris() { return this.i.length / 3; }
 }
+/**
+ * 按位置分块的 Geo：用法和 Geo 一样，但每个面按第一个顶点落在哪个格子，分到那个格子自己的几何里。
+ * 全图的路面、标线、路缘这类东西用它：各块有自己的包围球，视野外和太远的块整块不画。build() 返回 [{ geo, x, z }]。
+ */
+export class ChunkGeo extends Geo {
+  constructor(size = 1200) {      // 实测瓶颈是绘制次数不是面数：块切小了反而慢，所以块很大，只起“太远不画”的作用
+    super(); this.size = size; this.cells = new Map(); }
+  at(x, z) { const cx = Math.floor(x / this.size), cz = Math.floor(z / this.size), k = cx + ',' + cz; let g = this.cells.get(k); if (!g) { g = new Geo(); g.cx = (cx + 0.5) * this.size; g.cz = (cz + 0.5) * this.size; this.cells.set(k, g); } return g; }
+  quad(...a) { this.at(a[0], a[2]).quad(...a); }
+  flat(...a) { this.at(a[0], a[1]).flat(...a); }
+  quadN(P, N, col, uv) { this.at(P[0][0], P[0][2]).quadN(P, N, col, uv); }
+  build() { return [...this.cells.values()].map(g => ({ x: g.cx, z: g.cz, geo: g.build() })); }
+}
 export const lin = (hex) => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; };
