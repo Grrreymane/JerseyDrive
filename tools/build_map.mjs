@@ -7,9 +7,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/raw/osm.json'), 'utf8'));
+// 区域：node tools/build_map.mjs [downtown|jsq|newark]，表在 tools/regions.json
+const REGION = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/regions.json'), 'utf8'))[process.argv[2] || 'downtown'];
+const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/raw', REGION.raw), 'utf8'));
+const OUT = path.join(ROOT, 'data', REGION.out);
 
-const BBOX = { s: 40.7080, w: -74.0680, n: 40.7370, e: -74.0300 };
+const BBOX = { s: REGION.bbox[0], w: REGION.bbox[1], n: REGION.bbox[2], e: REGION.bbox[3] };
 const LAT0 = (BBOX.s + BBOX.n) / 2, LON0 = (BBOX.w + BBOX.e) / 2;
 const KX = 111320 * Math.cos(LAT0 * Math.PI / 180), KZ = 110574;
 const proj = (lat, lon) => [(lon - LON0) * KX, -(lat - LAT0) * KZ];
@@ -268,8 +271,8 @@ for (const w of ways) {
 
 const out = { version: 1, origin: { lat: LAT0, lon: LON0, kx: KX, kz: KZ }, half: { x: r2(HX), z: r2(HZ) }, segs, juncs: juncOut, buildings, parks };
 fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
-fs.writeFileSync(path.join(ROOT, 'data/map.json'), JSON.stringify(out));
+fs.writeFileSync(OUT, JSON.stringify(out));
 const cc = {}; for (const j of juncOut) cc[j.control] = (cc[j.control] || 0) + 1;
 console.log(`segs ${segs.length} (merged ${merged}), juncs ${juncOut.length}`, cc, `tagged-stop ${nStopTagged} inferred-stop ${nStopInferred}`);
-console.log(`buildings ${buildings.length}, parks ${parks.length}, size ${(fs.statSync(path.join(ROOT, 'data/map.json')).size / 1024).toFixed(0)} KB`);
+console.log(`buildings ${buildings.length}, parks ${parks.length}, size ${(fs.statSync(OUT).size / 1024).toFixed(0)} KB`);
 console.log('total road km', (segs.reduce((s, g) => { let L = 0; for (let i = 2; i < g.pts.length; i += 2) L += Math.hypot(g.pts[i] - g.pts[i - 2], g.pts[i + 1] - g.pts[i - 1]); return s + L; }, 0) / 1000).toFixed(1));

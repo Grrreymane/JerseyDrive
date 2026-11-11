@@ -43,7 +43,11 @@ function applyStyle(i, announce) {
 }
 { let saved = null; try { saved = localStorage.getItem('jdStyle2'); } catch { /* 同上 */ } applyStyle(Math.max(0, STYLES.findIndex(x => x.id === (params.get('style') || saved)))); }
 
-const raw = await (await fetch('data/map.json')).json();
+// 区域：三张独立的地图，开始界面上选（换区域 = 带着 ?map= 重新打开页面）
+const REGIONS = { downtown: ['Jersey City 市中心', 'data/map.json'], jsq: ['Journal Square', 'data/map_jsq.json'], newark: ['Newark 市中心', 'data/map_newark.json'] };
+let region = params.get('map'); try { region = region || localStorage.getItem('jdRegion'); } catch { /* 存不了就用默认 */ }
+if (!REGIONS[region]) region = 'downtown';
+const raw = await (await fetch(REGIONS[region][1])).json();
 const map = prepareMap(raw);
 const world = buildWorld(map, scene);
 // 导航画面：一张画布，既贴在车里的中控屏上，也给车外视角的圆形小地图用
@@ -476,6 +480,8 @@ function buildLessonList() {
   for (const b of $('lessonList').children) b.onclick = () => { audio.unlock(); startLesson(+b.dataset.i); };
 }
 buildLessonList();
+$('regionList').innerHTML = Object.entries(REGIONS).map(([id, r]) => `<button class="${id === region ? '' : 'ghost'}" data-id="${id}">${r[0]}</button>`).join('');
+for (const b of $('regionList').children) b.onclick = () => { if (b.dataset.id === region) return; try { localStorage.setItem('jdRegion', b.dataset.id); } catch { /* 同上 */ } const u = new URL(location.href); u.searchParams.set('map', b.dataset.id); location.href = u.href; };
 $('btnLdNext').onclick = () => startLesson(lesson.i + 1);
 $('btnLdRetry').onclick = () => startLesson(lesson.i);
 $('btnLdFree').onclick = () => { endLesson(); show('lessonDone', false); setPaused(false); };

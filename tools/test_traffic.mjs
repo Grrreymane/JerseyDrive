@@ -2,7 +2,9 @@
 import { readFileSync } from 'node:fs';
 import { prepareMap, obbOverlap } from '../src/sim/map.js';
 import { makeTraffic, stepTraffic } from '../src/sim/traffic.js';
-const map = prepareMap(JSON.parse(readFileSync(new URL('../data/map.json', import.meta.url))));
+const FILE = process.argv[2] || 'map.json';
+const map = prepareMap(JSON.parse(readFileSync(new URL('../data/' + FILE, import.meta.url))));
+console.log('地图 ' + FILE);
 let fail = 0;
 for (const [px, pz] of [[0, 0], [300, -200], [-350, 250]]) {
   const T = makeTraffic(map, 777 + px), pl = { x: px, z: pz, h: 0, v: 0, cur: null, stopT: -1 };
@@ -22,6 +24,6 @@ for (const [px, pz] of [[0, 0], [300, -200], [-350, 250]]) {
 {
   const { pointAt, segY } = await import('../src/sim/map.js'); let bad = 0, n = 0; const P = {}, L = {};
   for (const s of map.segs) { if (!s.high) continue; for (let u = s.trimA + 5; u < s.len - s.trimB - 5; u += 25) { const y = segY(s, u); if (y < 5) continue; pointAt(s, u, P); n++; map.locate(P.x, P.z, L, y); if (!L.seg || !L.seg.high) bad++; map.locate(P.x, P.z, L, 0); if (L.seg && L.seg.high && L.y > 3) bad++; if (!map.onRoad(P.x, P.z, 0, y)) bad++; } }
-  console.log((bad ? ' FAIL ' : '  ok  ') + ` 高架分层定位：采样 ${n} 处，出错 ${bad}`); if (bad || !n) fail++;
+  console.log((bad ? ' FAIL ' : '  ok  ') + ` 高架分层定位：采样 ${n} 处，出错 ${bad}`); if (bad || (!n && FILE === 'map.json')) fail++;
 }
 if (fail) { console.log('车流自检没过'); process.exit(1); } else console.log('车流自检通过');
