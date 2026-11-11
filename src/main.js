@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { prepareMap, signalState, laneCenter, laneInfo, offsetPoint, pointAt, segY, CAR } from './sim/map.js';
+import { prepareMap, signalState, laneCenter, laneInfo, offsetPoint, pointAt, segY, turnType, CAR } from './sim/map.js';
 import { makeCar, stepCar, setSignal, shift, carCenter, MPH, GEARS } from './sim/car.js';
 import { makeTraffic, stepTraffic } from './sim/traffic.js';
 import { buildActors } from './view/actors.js';
@@ -102,7 +102,7 @@ function cleanStep() {
   boardTick(S.clean);
 }
 addEventListener('pagehide', () => boardLeave(S.clean));
-function restart() { endClean(); S.crash = null; $('hit').classList.remove('on'); S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; T = makeTraffic(map); placeCar(startPose); $('toasts').innerHTML = ''; }
+function restart() { if (ready) clearRoute(); endClean(); S.crash = null; $('hit').classList.remove('on'); S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; T = makeTraffic(map); placeCar(startPose); $('toasts').innerHTML = ''; }
 restart();
 
 // ---------- 输入 ----------
@@ -234,6 +234,11 @@ function drawMini() {
       const q = offsetPoint(s, s.len / 2, 0, {}), a = Math.atan2(q.dz, q.dx);
       mc.save(); mc.translate(q.x, q.z); mc.rotate(a); mc.fillStyle = '#e8eaee'; mc.beginPath(); mc.moveTo(5, 0); mc.lineTo(-4, -4); mc.lineTo(-4, 4); mc.fill(); mc.restore();
     }
+  }
+  if (route) {      // 导航路线：蓝色，画在路面上面
+    mc.strokeStyle = '#3d8bff'; mc.lineWidth = 6; mc.beginPath();
+    for (const r of route.list) { const g = r.seg; if (Math.hypot(g.px[g.n >> 1] - car.x, g.pz[g.n >> 1] - car.z) > range + g.len) continue; mc.moveTo(g.px[0], g.pz[0]); for (let i = 1; i < g.n; i++) mc.lineTo(g.px[i], g.pz[i]); }
+    mc.stroke(); mc.fillStyle = '#ff4b3e'; mc.beginPath(); mc.arc(route.dest.x, route.dest.z, 6, 0, 7); mc.fill();
   }
   for (const j of map.juncs) {
     if (j.control === 'joint' || j.control === 'none' || Math.hypot(j.cx - car.x, j.cz - car.z) > range) continue;
@@ -371,7 +376,7 @@ function tick(now) {
   if (frame % 4 === 0) world.updateSignals(S.t);
   view.update(S.car, lookT, dt);
   audio.engine(S.running && !S.paused ? S.car : null);
-  if (S.running) { updateHud(); if (frame % 3 === 0) drawMini(); if (frame % 10 === 0) lessonTick(); }
+  if (S.running) { updateHud(); if (frame % 3 === 0) drawMini(); if (frame % 10 === 0) { lessonTick(); navTick(); } }
   if (frame % 6 === 0) world.updateLod(S.car.x, S.car.z);
   world.stream(S.car.x, S.car.z);
   sky.update(view.camera, S.car.x, S.car.z, (frame & 1) === 0);
@@ -588,6 +593,12 @@ function drawBig() {
     let a = Math.atan2(q.dz, q.dx); if (a > Math.PI / 2 || a < -Math.PI / 2) a += Math.PI;
     c.save(); c.translate(X(q.x), Z(q.z)); c.rotate(a); c.strokeStyle = 'rgba(255,255,255,0.9)'; c.strokeText(shortName(g.name), 0, 0); c.fillStyle = '#3c4043'; c.fillText(shortName(g.name), 0, 0); c.restore();
   }
+  if (route) {
+    c.strokeStyle = 'rgba(66,133,244,0.9)'; c.lineWidth = 6; c.beginPath();
+    for (const r of route.list) { const g = r.seg; c.moveTo(X(g.px[0]), Z(g.pz[0])); for (let i = 1; i < g.n; i++) c.lineTo(X(g.px[i]), Z(g.pz[i])); }
+    c.stroke(); const dx = X(route.dest.x), dz = Z(route.dest.z);
+    c.fillStyle = '#ea4335'; c.beginPath(); c.arc(dx, dz - 16, 9, 0, 7); c.fill(); c.beginPath(); c.moveTo(dx - 7, dz - 11); c.lineTo(dx + 7, dz - 11); c.lineTo(dx, dz); c.fill(); c.fillStyle = '#fff'; c.beginPath(); c.arc(dx, dz - 16, 3.5, 0, 7); c.fill();
+  }
   // 自己的车
   c.save(); c.translate(X(S.car.x), Z(S.car.z)); c.rotate(S.car.h + Math.PI / 2); c.fillStyle = 'rgba(66,133,244,0.22)'; c.beginPath(); c.arc(0, 0, 20, 0, 7); c.fill();
   c.fillStyle = '#4285f4'; c.strokeStyle = '#fff'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(0, -12); c.lineTo(8, 9); c.lineTo(0, 5); c.lineTo(-8, 9); c.closePath(); c.fill(); c.stroke(); c.restore();
@@ -596,9 +607,12 @@ function drawBig() {
 }
 {
   let drag = null; const el = $('bigmap');
-  el.addEventListener('pointerdown', (e) => { drag = [e.clientX, e.clientY]; el.setPointerCapture(e.pointerId); });
-  el.addEventListener('pointermove', (e) => { if (!drag) return; bm.x -= (e.clientX - drag[0]) / bm.s; bm.z -= (e.clientY - drag[1]) / bm.s; drag = [e.clientX, e.clientY]; drawBig(); });
-  el.addEventListener('pointerup', () => { drag = null; });
+  let moved = 0;
+  el.addEventListener('pointerdown', (e) => { if (e.target.id === 'btnNavClear') return; drag = [e.clientX, e.clientY]; moved = 0; el.setPointerCapture(e.pointerId); });
+  el.addEventListener('pointermove', (e) => { if (!drag) return; moved += Math.abs(e.clientX - drag[0]) + Math.abs(e.clientY - drag[1]); bm.x -= (e.clientX - drag[0]) / bm.s; bm.z -= (e.clientY - drag[1]) / bm.s; drag = [e.clientX, e.clientY]; drawBig(); });
+  // 没怎么拖就松手 = 点了一下：把那里设成目的地
+  el.addEventListener('pointerup', (e) => { if (drag && moved < 6) setDest((e.clientX - innerWidth / 2) / bm.s + bm.x, (e.clientY - innerHeight / 2) / bm.s + bm.z); drag = null; });
+  $('btnNavClear').onclick = () => { clearRoute(); drawBig(); };
   el.addEventListener('wheel', (e) => { e.preventDefault(); const k = Math.exp(-e.deltaY * 0.0015), s1 = Math.max(0.12, Math.min(6, bm.s * k)), dx = e.clientX - innerWidth / 2, dz = e.clientY - innerHeight / 2; bm.x += dx / bm.s - dx / s1; bm.z += dz / bm.s - dz / s1; bm.s = s1; drawBig(); }, { passive: false });
   addEventListener('resize', () => { if (bigOpen) drawBig(); });
 }
@@ -614,3 +628,69 @@ window.__jd.toHighway = (ramp) => {
 if (params.get('spot') === 'tunnel') { window.__jd.freeze = null; window.__jd.toTunnel(+(params.get('k') || 0)); $('hud').style.display = ''; }
 if (params.get('spot') === 'highway') { window.__jd.freeze = null; window.__jd.toHighway(params.has('ramp')); $('hud').style.display = ''; }
 if (params.has('nohud')) $('hud').style.visibility = 'hidden';
+
+// ---------- 导航：在大地图上点一下设目的地，按时间最短算路线（认单行道），一路提示下一个转弯 ----------
+let route = null, routeT = 0;
+function curState() {
+  const c = S.car, l = map.locate(c.x + Math.cos(c.h) * CAR.center, c.z + Math.sin(c.h) * CAR.center, {}, c.y || 0); if (!l.seg) return null;
+  let fwd = Math.cos(c.h) * l.dx + Math.sin(c.h) * l.dz >= 0; if (!fwd && l.seg.lb === 0) fwd = true;
+  return { seg: l.seg, fwd, s: l.s };
+}
+function planRoute(dest) {
+  const cur = curState(); if (!cur) return null;
+  const N = map.segs.length * 2, dist = new Float64Array(N).fill(1e18), prev = new Int32Array(N).fill(-1), done = new Uint8Array(N), st = cur.seg.id * 2 + (cur.fwd ? 1 : 0);
+  const ahead = cur.seg === dest.seg && (cur.fwd ? dest.s > cur.s : dest.s < cur.s); let goal = ahead ? st : -1; dist[st] = 0;
+  while (goal < 0) {
+    let u = -1, best = 1e17; for (let i = 0; i < N; i++) if (!done[i] && dist[i] < best) { best = dist[i]; u = i; }
+    if (u < 0) return null;
+    const seg = map.segs[u >> 1], fwd = !!(u & 1); done[u] = 1;
+    if (seg === dest.seg && u !== st) { goal = u; break; }
+    const j = fwd ? seg.jb : seg.ja; if (!j) continue; const leg = map.legOf(j, seg, fwd ? 'b' : 'a'); if (!leg) continue;
+    for (const l of j.legs) {
+      if (l === leg || !l.exit) continue; const g = l.segRef, f2 = l.end === 'a'; if (!(f2 ? g.lf : g.lb)) continue;
+      const type = turnType(-leg.ox, -leg.oz, l.ox, l.oz); if (type === 'uturn') continue;
+      const v = g.id * 2 + (f2 ? 1 : 0), cost = best + g.useLen / (g.speed / MPH) + (j.control === 'joint' ? 0 : (type === 'left' ? 12 : type === 'right' ? 6 : 3) + (j.control === 'signal' ? 8 : 0));
+      if (cost < dist[v]) { dist[v] = cost; prev[v] = u; }
+    }
+  }
+  const list = []; for (let u = goal; u >= 0; u = prev[u]) list.unshift({ seg: map.segs[u >> 1], fwd: !!(u & 1) });
+  let len = 0; for (const r of list) len += r.seg.useLen;
+  return { dest, list, len };
+}
+function setDest(x, z) {
+  const l = map.locate(x, z, {}); if (!l.seg || l.d > 60) return;
+  const P = {}; pointAt(l.seg, l.s, P);
+  const r = planRoute({ seg: l.seg, s: l.s, x: P.x, z: P.z, name: l.seg.name });
+  if (!r) { toast({ sev: 'info' }, '到不了那里', '从现在的位置按单行道规则开不过去，换个地方试试。', 3500); return; }
+  route = r; routeT = performance.now(); show('btnNavClear', true); drawBig(); navTick();
+}
+function clearRoute() { route = null; show('navBox', false); show('btnNavClear', false); }
+const NAV_ARROW = { left: '↰', right: '↱', through: '↑', arrive: '⚑' }, NAV_WORD = { left: '左转', right: '右转' };
+function navTick() {
+  if (!route) return;
+  const cur = S.R.cur || curState(); if (!cur) return;
+  const c = S.car, dd = Math.hypot(c.x + Math.cos(c.h) * CAR.center - route.dest.x, c.z + Math.sin(c.h) * CAR.center - route.dest.z);
+  if (cur.seg === route.dest.seg && dd < 26) { toast({ sev: 'good' }, '到达目的地', shortName(route.dest.name || ''), 4000); audio.good(); clearRoute(); return; }
+  if (cur.junc) return;
+  const i = route.list.findIndex(r => r.seg === cur.seg && r.fwd === cur.fwd);
+  if (i < 0) {      // 开出了路线：重新算（最多每秒一次）
+    if (performance.now() - routeT > 1000) { routeT = performance.now(); const r = planRoute(route.dest); if (r) route = r; }
+    return;
+  }
+  let d = cur.fwd ? cur.seg.len - cur.seg.trimB - cur.s : cur.s - cur.seg.trimA, kind = 'arrive', into = '', total = d;
+  for (let k = i + 1; k < route.list.length; k++) total += route.list[k].seg.useLen;
+  for (let k = i; k < route.list.length - 1; k++) {
+    const a = route.list[k], b = route.list[k + 1], j = a.fwd ? a.seg.jb : a.seg.ja, la = map.legOf(j, a.seg, a.fwd ? 'b' : 'a'), lb = map.legOf(j, b.seg, b.fwd ? 'a' : 'b');
+    const type = la && lb ? turnType(-la.ox, -la.oz, lb.ox, lb.oz) : 'through';
+    if (type !== 'through' && j.control !== 'joint') { kind = type; into = b.seg.name; break; }
+    d += b.seg.useLen + j.r;
+  }
+  if (kind === 'arrive') d = dd;
+  const near = d < 45, m = d >= 1000 ? (d / 1000).toFixed(1) + ' 公里' : Math.max(10, Math.round(d / 10) * 10) + ' 米';
+  $('navArrow').textContent = NAV_ARROW[kind];
+  $('navText').textContent = kind === 'arrive' ? `${m}后到达` : near ? `现在${NAV_WORD[kind]}` : `${m}后${NAV_WORD[kind]}`;
+  const need = kind === 'left' ? -1 : kind === 'right' ? 1 : 0, sig = need && d < 70 && c.signal !== need ? `　·　打${kind === 'left' ? '左' : '右'}灯（${kind === 'left' ? 'Q' : 'E'}）` : '';
+  $('navSub').textContent = (kind === 'arrive' ? shortName(route.dest.name || '目的地') : '进入 ' + shortName(into || '无名路')) + `　·　全程还剩 ${total >= 1000 ? (total / 1000).toFixed(1) + ' 公里' : Math.round(total / 10) * 10 + ' 米'}` + sig;
+  show('navBox', true);
+}
+window.__jd.setDest = setDest; window.__jd.navRoute = () => route;
