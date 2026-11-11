@@ -7,7 +7,8 @@ kbd { display: inline-block; min-width: 1.6em; padding: 0 0.4em; border: 1px sol
 
 #hud { position: fixed; inset: 0; pointer-events: none; }
 #topbar { position: absolute; top: 14px; left: 16px; display: flex; gap: 10px; align-items: stretch; }
-#street, #score { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 7px 14px; backdrop-filter: blur(6px); }
+#clean b { font-size: 19px; font-variant-numeric: tabular-nums; } #clean span { color: var(--dim); margin-left: 3px; font-size: 12px; } #clean em { font-style: normal; color: var(--dim); margin-left: 8px; font-size: 12px; }
+#street, #score, #clean { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 7px 14px; backdrop-filter: blur(6px); }
 #streetName { font-weight: 700; font-size: 17px; }
 #streetInfo { margin-left: 10px; color: var(--dim); font-size: 13px; }
 #score b { font-size: 19px; font-variant-numeric: tabular-nums; } #score span { color: var(--dim); margin-left: 3px; font-size: 12px; }

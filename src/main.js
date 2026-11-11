@@ -12,6 +12,7 @@ import { buildCarView } from './view/carview.js';
 import { signDataURL, shortName } from './view/signs.js';
 import { EVENT_TEXT, EVENT_SHORT, hintText, ALERT_TEXT, SIGN_BOOK, SHIFT_MSG } from './rulebook.js';
 import { makeAudio } from './view/audio.js';
+import { boardStart, boardEnd, boardTick, boardLeave, boardActive } from './board.js';
 import { LESSONS, lessonState } from './lessons.js';
 
 const $ = (id) => document.getElementById(id);
@@ -47,6 +48,19 @@ function applyStyle(i, announce) {
 const REGIONS = { downtown: ['Jersey City 市中心', 'data/map.json'], jsq: ['Journal Square', 'data/map_jsq.json'], newark: ['Newark 市中心', 'data/map_newark.json'] };
 let region = params.get('map'); try { region = region || localStorage.getItem('jdRegion'); } catch { /* 存不了就用默认 */ }
 if (!REGIONS[region]) region = 'downtown';
+$('regionList').innerHTML = Object.entries(REGIONS).map(([id, r]) => `<button class="${id === region ? '' : 'ghost'}" data-id="${id}">${r[0]}</button>`).join('');
+for (const b of $('regionList').children) b.onclick = () => { if (b.dataset.id === region) return; try { localStorage.setItem('jdRegion', b.dataset.id); } catch { /* 同上 */ } const u = new URL(location.href); u.searchParams.set('map', b.dataset.id); location.href = u.href; };
+let lesson = null, stars = {};
+try { stars = JSON.parse(localStorage.getItem('jdLessons') || '{}'); } catch { /* 存不了就不记 */ }
+// 区域和课程表在地图加载之前就显示出来；加载时点了课程先记下，加载完自动开始
+let ready = false, wantLesson = -1;
+function buildLessonList() {
+  $('lessonList').innerHTML = LESSONS.map((l, i) => `<button class="ghost" data-i="${i}"><b>${i + 1}. ${l.title}</b><span>${wantLesson === i ? '加载中…' : '★'.repeat(stars[i] || 0)}</span></button>`).join('');
+  for (const b of $('lessonList').children) b.onclick = () => { if (!ready) { wantLesson = +b.dataset.i; buildLessonList(); return; } audio.unlock(); startLesson(+b.dataset.i); };
+}
+buildLessonList();
+$('btnStart').textContent = REGIONS[region][0] + ' 加载中…';
+await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));      // 先让浏览器把界面画出来，再开始加载（建场景那几秒主线程是占满的）
 const raw = await (await fetch(REGIONS[region][1])).json();
 const map = prepareMap(raw);
 const world = buildWorld(map, scene);
@@ -60,7 +74,7 @@ let T = makeTraffic(map);
 const audio = makeAudio();
 
 // ---------- 状态 ----------
-const S = { car: makeCar(), R: makeRules(), t: 0, running: false, paused: true, coach: true, driveTime: 0, startOdo: 0 };
+const S = { car: makeCar(), R: makeRules(), t: 0, running: false, paused: true, coach: true, driveTime: 0, startOdo: 0, clean: 0 };
 const startPose = (() => {
   const want = params.get('seg');
   const seg = (want && map.segs[+want]) || map.segs.filter(s => s.cls === 'residential' && s.oneway && s.useLen > 110 && s.lf === 1 && Math.abs(s.px[0]) < 350 && Math.abs(s.pz[0]) < 350)
@@ -70,7 +84,25 @@ const startPose = (() => {
   return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h };
 })();
 function placeCar(p) { Object.assign(S.car, { x: p.x, z: p.z, h: p.h, y: p.y || 0, v: 0, steer: 0 }); clearTransient(S.R); S.R.needReset = null; }
-function restart() { S.crash = null; $('hit').classList.remove('on'); S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; T = makeTraffic(map); placeCar(startPose); $('toasts').innerHTML = ''; }
+// 无违章里程：往前开一米记一米，扣分的违规清零。最长的一段存本地，平台里还会上排行榜
+let bestClean = 0; try { bestClean = +localStorage.getItem('jdBestClean') || 0; } catch { /* 存不了就不记 */ }
+function endClean() {
+  const m = S.clean; S.clean = 0; if (!(m > 0)) return;
+  boardEnd(m);
+  if (m > bestClean) { bestClean = Math.floor(m); try { localStorage.setItem('jdBestClean', bestClean); } catch { /* 同上 */ } }
+  return m;
+}
+function cleanStep() {
+  if (S.R.events.some(e => PENALTY[e.type])) {
+    const m = endClean(), best = Math.floor(m) >= bestClean;
+    if (m >= 100) toast({ sev: 'info' }, `这段无违章开了 ${Math.floor(m)} 米`, best ? '新纪录！' : `最好的一段是 ${bestClean} 米`, 4500);
+    return;
+  }
+  if (S.car.v > 0.3) { S.clean += S.car.v * DT; if (!boardActive()) boardStart(); }
+  boardTick(S.clean);
+}
+addEventListener('pagehide', () => boardLeave(S.clean));
+function restart() { endClean(); S.crash = null; $('hit').classList.remove('on'); S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; T = makeTraffic(map); placeCar(startPose); $('toasts').innerHTML = ''; }
 restart();
 
 // ---------- 输入 ----------
@@ -129,7 +161,7 @@ function readInput(dt) {
 }
 
 // ---------- 界面 ----------
-const el = { speed: $('speed'), street: $('streetName'), info: $('streetInfo'), score: $('scoreNum'), limit: $('limitNum'), sigL: $('sigL'), sigR: $('sigR'), coach: $('coach'), cIcon: $('coachIcon'), cText: $('coachText'), cSub: $('coachSub'), preview: $('preview'), gas: $('pGas'), brake: $('pBrake') };
+const el = { speed: $('speed'), street: $('streetName'), info: $('streetInfo'), score: $('scoreNum'), limit: $('limitNum'), sigL: $('sigL'), sigR: $('sigR'), coach: $('coach'), cIcon: $('coachIcon'), cText: $('coachText'), cSub: $('coachSub'), preview: $('preview'), gas: $('pGas'), brake: $('pBrake'), clean: $('cleanNum'), cleanBest: $('cleanBest') };
 const gearEls = [...document.querySelectorAll('#gears span')];
 const last = {};
 const set = (key, v, fn) => { if (last[key] !== v) { last[key] = v; fn(v); } };
@@ -159,6 +191,8 @@ function updateHud() {
   set('street', cur ? shortName(cur.street || '（无名路）') : '—', (v) => el.street.textContent = v);
   set('info', cur && !cur.junc ? (cur.seg.oneway ? '单行道' : '双向') + ' · ' + (cur.fwd ? cur.seg.lf : cur.seg.lb || cur.seg.lf) + ' 车道' : cur?.junc ? '路口内' : '', (v) => el.info.textContent = v);
   set('score', R.score, (v) => el.score.textContent = v);
+  set('clean', Math.floor(S.clean), (v) => el.clean.textContent = v);
+  set('cleanBest', Math.max(bestClean, Math.floor(S.clean)), (v) => el.cleanBest.textContent = v ? '最佳 ' + v : '');
   set('gear', car.gear, (g) => gearEls.forEach(e => e.classList.toggle('on', e.dataset.g === g)));
   const blink = (performance.now() % 760) < 380;
   set('sigL', (car.signal === -1 || car.signal === 2) && blink, (v) => el.sigL.classList.toggle('on', v));
@@ -280,6 +314,7 @@ function simStep(lookT) {
   if (trafficOn) stepActors(DT);
   stepRules(S.R, S.car, map, S.t, DT, trafficOn ? T : null); S.t += DT; S.driveTime += DT;
   showEvents();
+  cleanStep();
   lessonSim();
   if (S.R.needReset) {
     // 撞了：先停在原地 1.7 秒（泛红、闷响、被撞的人倒地、被撞的车打双闪），再退回去
@@ -425,8 +460,6 @@ if (params.has('fly') || params.has('bench')) {
 window.__jd.ready = true;
 
 // ---------- 课程 ----------
-let lesson = null, stars = {};
-try { stars = JSON.parse(localStorage.getItem('jdLessons') || '{}'); } catch { /* 存不了就不记 */ }
 /** 出发点：离地图中心最近、符合这节课要求的地方 */
 // 侧方停车的目标车位：绿色的框
 const marker = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 2.2), new THREE.MeshBasicMaterial({ color: 0x35e07a, transparent: true, opacity: 0.45, depthWrite: false })); marker.visible = false; marker.renderOrder = 5; scene.add(marker);
@@ -511,17 +544,11 @@ function lessonTick() {
   $('btnLdNext').style.display = ok && lesson.i < LESSONS.length - 1 ? '' : 'none';
   show('lessonDone', true); if (ok) audio.good(); else audio.bad();
 }
-function buildLessonList() {
-  $('lessonList').innerHTML = LESSONS.map((l, i) => `<button class="ghost" data-i="${i}"><b>${i + 1}. ${l.title}</b><span>${'★'.repeat(stars[i] || 0)}</span></button>`).join('');
-  for (const b of $('lessonList').children) b.onclick = () => { audio.unlock(); startLesson(+b.dataset.i); };
-}
-buildLessonList();
-$('regionList').innerHTML = Object.entries(REGIONS).map(([id, r]) => `<button class="${id === region ? '' : 'ghost'}" data-id="${id}">${r[0]}</button>`).join('');
-for (const b of $('regionList').children) b.onclick = () => { if (b.dataset.id === region) return; try { localStorage.setItem('jdRegion', b.dataset.id); } catch { /* 同上 */ } const u = new URL(location.href); u.searchParams.set('map', b.dataset.id); location.href = u.href; };
+ready = true; if (wantLesson >= 0) { const w = wantLesson; wantLesson = -1; startLesson(w); }
 $('btnLdNext').onclick = () => startLesson(lesson.i + 1);
 $('btnLdRetry').onclick = () => startLesson(lesson.i);
 $('btnLdFree').onclick = () => { endLesson(); show('lessonDone', false); setPaused(false); };
-const toMenu = () => { endLesson(); buildLessonList(); for (const id of ['lessonDone', 'pause', 'hud']) show(id, false); show('start', true); S.running = false; setPaused(true); };
+const toMenu = () => { endClean(); endLesson(); buildLessonList(); for (const id of ['lessonDone', 'pause', 'hud']) show(id, false); show('start', true); S.running = false; setPaused(true); };
 $('btnLdMenu').onclick = toMenu; $('btnLessons').onclick = toMenu;
 if (params.has('lesson')) startLesson(Math.max(0, Math.min(LESSONS.length - 1, +params.get('lesson') - 1)));
 
