@@ -13,13 +13,28 @@ const mixW = (c, k) => [c[0] + (1 - c[0]) * k, c[1] + (1 - c[1]) * k, c[2] + (1 
 // 配色：大面积墙体用低饱和的砖红、米色、灰蓝；鲜艳的颜色只给招牌、雨棚和门
 const PAL = {
   brick: ['#b06e58', '#a05f4d', '#b98567', '#c7a684', '#96614f', '#b9775d', '#a67c66', '#996b5a'].map(lin),
+  brown: ['#7a4f3d', '#8a5a47', '#6e4638', '#9a6148', '#a3654f', '#84503f', '#b07a5c', '#75514a', '#8f6a55'].map(lin),      // 褐石、深红砖
   siding: ['#d8d2c2', '#b7c2c7', '#c8b999', '#aab7a3', '#d3c0a6', '#92a4b0', '#e0dacc', '#c3a8a0', '#b9b3a3'].map(lin),
   stucco: ['#d6cebd', '#c7c0b1', '#dfd5c0', '#b9b5ac', '#cdbfa9', '#c4c9c6'].map(lin),
   glass: ['#8fb2cc', '#a3c2d6', '#7fa3c2', '#b4ccd9'].map(lin),
 };
+// 街区风格：不同片区的房子用料不一样。[南, 北, 西, 东, 小楼挂板比例, 小楼挂板+砖比例, 大楼砖比例, 大楼砖+抹灰比例, 砖的色板]
+// 市中心老街区和 Hoboken 是褐石 / 红砖排屋；Heights、JSQ 往西、Kearny、Newark 住宅区以塑料挂板的两三家庭房为主；水边是新建的公寓和写字楼
+const DISTRICTS = [
+  [40.708, 40.737, -74.0405, -74.02, 0.05, 0.45, 0.35, 0.95, 'brick'],      // 水边：Newport、Exchange Place、Paulus Hook 东侧
+  [40.737, 40.76, -74.045, -74.02, 0.08, 0.93, 0.8, 0.95, 'brown'],          // Hoboken 南端
+  [40.711, 40.7335, -74.058, -74.0405, 0.1, 0.93, 0.8, 0.95, 'brown'],       // JC 市中心老街区
+  [40.7335, 40.76, -74.068, -74.045, 0.7, 0.93, 0.45, 0.8, 'brick'],         // The Heights
+  [40.70, 40.76, -74.11, -74.058, 0.6, 0.92, 0.55, 0.85, 'brick'],           // JSQ、McGinley、West Side
+  [40.70, 40.76, -74.165, -74.11, 0.65, 0.92, 0.5, 0.85, 'brick'],           // Kearny、Harrison、Ironbound
+  [40.73, 40.746, -74.185, -74.165, 0.1, 0.7, 0.6, 0.95, 'brick'],           // Newark 市中心
+  [40.70, 40.76, -74.2, -74.165, 0.5, 0.9, 0.55, 0.85, 'brick'],             // Newark 其余
+];
+const DEFAULT_DIST = [0, 0, 0, 0, 0.42, 0.9, 0.58, 0.9, 'brick'];
 const TRIMS = ['#efe8d8', '#e3dccb', '#f4f0e6', '#4a3f38', '#3a3d42'].map(lin);
 const ACCENTS = ['#b8483e', '#2f6a86', '#2f7257', '#cf9a3a', '#754163', '#2a476b', '#c06a36', '#34363c', '#3f8780', '#9e3f52'].map(lin);
 const DOORS = ['#8f2f2a', '#27466f', '#2e5f48', '#2f2f33', '#3d7f86', '#6b4a32', '#b98a2e'].map(lin);
+const SHINGLE = ['#5b5f66', '#6a5a50', '#4f5560', '#77695c', '#3f4349', '#6b3f37'].map(lin);
 const ROOF = ['#8d949e', '#9a9fa6', '#84898f'].map(lin), STONE = lin('#d6cfbf'), STONE_D = lin('#b3ab9b'), UNIT = lin('#b9bfc6');
 const NAMES = ['CAFE', 'DELI', 'PIZZA', 'BOOKS', 'BAKERY', 'BARBER', 'BODEGA', 'LAUNDRY', 'FLOWERS', 'PHARMACY', 'HARDWARE', 'RECORDS', 'TACOS', 'MARKET', 'BAGELS', 'NOODLES'];
 
@@ -104,7 +119,7 @@ export function buildBuildings(map, group, occupy, isFree) {
   const texW = wallTextures(), A = atlasTexture(), bcells = new Map();
   const newGeos = () => ({ brick: new Geo(), siding: new Geo(), stucco: new Geo(), glass: new Geo(), trim: new Geo(), core: new Geo(), flat: new Geo(), card: new Geo(), pane: new Geo(), I: {}, lab: [] });
   const inPolyV = (pts, x, z) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a.y > z) !== (b.y > z) && x < (b.x - a.x) * (z - a.y) / (b.y - a.y) + a.x) c = !c; } return c; };
-  const LOC = {}, PT = {}; let nWin = 0, nShop = 0, nNum = 0, nName = 0;
+  const OR = map.raw.origin, LOC = {}, PT = {}; let nWin = 0, nShop = 0, nNum = 0, nName = 0;
   const samples = { shop: [], stoop: [], win: [], num: [], name: [] };      // 出样板截图用：几种立面各记一些位置
 
   // 一栋楼的全部几何，写进它所在分块 C 的各个 Geo 里
@@ -116,9 +131,11 @@ export function buildBuildings(map, group, occupy, isFree) {
     if (area > 0) pts.reverse();                 // 统一绕向，墙面法线朝外
     const fa = Math.abs(area) / 2, gh = h < 6.2 ? Math.min(GROUND_H, h - 0.3) : Math.min(GROUND_H, h * 0.6), small = fa < 170 && h < 15;
     // ---- 这栋楼的样式（全部由楼的编号决定，每次打开都一样） ----
+    const gab = b.rg && !tall && n <= 14 ? b.rg : null;      // 坡屋顶：[屋脊方向, 屋脊比檐口高多少]
     const plain = b.k === 'i', names = b.nm || null; let ni = 0, numDone = !b.no, nameDone = !b.n;
-    const type = tall ? 'glass' : plain ? (R(1) < 0.6 ? 'stucco' : 'siding') : small ? (R(1) < 0.42 ? 'siding' : R(1) < 0.9 ? 'brick' : 'stucco') : (R(1) < 0.58 ? 'brick' : R(1) < 0.9 ? 'stucco' : 'siding');
-    const col = PAL[type][Math.floor(R(2) * PAL[type].length)], G = C[type], [TW, TH] = TEX_M[type];
+    const lat = OR.lat - cz / OR.kz, lon = OR.lon + cx / OR.kx, D = DISTRICTS.find(d => lat >= d[0] && lat < d[1] && lon >= d[2] && lon < d[3]) || DEFAULT_DIST;
+    const type = tall ? 'glass' : plain ? (R(1) < 0.6 ? 'stucco' : 'siding') : small ? (R(1) < D[4] ? 'siding' : R(1) < D[5] ? 'brick' : 'stucco') : (R(1) < D[6] ? 'brick' : R(1) < D[7] ? 'stucco' : 'siding');
+    const pal = type === 'brick' ? PAL[D[8]] : PAL[type], col = pal[Math.floor(R(2) * pal.length)], G = C[type], [TW, TH] = TEX_M[type];
     const trim = type === 'siding' ? TRIMS[Math.floor(R(3) * 3)] : TRIMS[Math.floor(R(3) * TRIMS.length)];
     const wk = type === 'siding' ? (R(4) < 0.65 ? 'C' : 'A') : type === 'brick' ? (R(4) < 0.65 ? 'A' : 'B') : (R(4) < 0.6 ? 'B' : 'A');
     const [nomW, nomH] = K.KIT['win' + wk], bayW = (wk === 'B' ? 3.3 : wk === 'C' ? 3.1 : 2.7) + R(5) * 0.6, wwS = nomW * (0.95 + R(6) * 0.15);
@@ -271,12 +288,12 @@ export function buildBuildings(map, group, occupy, isFree) {
       }
     }
     // ---- 腰线、檐口、女儿墙、屋顶 ----
-    const capCol = type === 'brick' ? (R(9) < 0.5 ? mixW(col, 0.55) : trim) : type === 'siding' ? trim : mixW(col, 0.35), PH = tall ? 1.1 : type === 'siding' ? 0.14 : 0.7;
+    const capCol = type === 'brick' ? (R(9) < 0.5 ? mixW(col, 0.55) : trim) : type === 'siding' ? trim : mixW(col, 0.35), PH = tall ? 1.1 : type === 'siding' || gab ? 0.14 : 0.7;
     const openE = (i) => info[i].open, detE = (i) => info[i].det && pts[i].distanceTo(pts[(i + 1) % n]) >= 2.2;
     if (fl && !tall) sweep(C.trim, type === 'siding' ? [[0, gh - 0.1], [0.035, gh - 0.1], [0.035, gh + 0.06], [0, gh + 0.09]] : [[0, gh - 0.22], [0.06, gh - 0.22], [0.1, gh - 0.06], [0.1, gh + 0.03], [0, gh + 0.07]], type === 'siding' ? trim : capCol, detE);
     const crown = tall ? [[0, h], [0, h + PH], [-0.3, h + PH], [-0.3, h]]
-      : type === 'brick' ? [[0, h - 0.78], [0.06, h - 0.78], [0.06, h - 0.62], [0.13, h - 0.52], [0.13, h - 0.4], [0.3, h - 0.2], [0.36, h - 0.2], [0.36, h], [0.42, h + 0.06], [0.42, h + 0.16], [0.1, h + 0.16], [0.1, h + PH], [-0.3, h + PH], [-0.3, h]]
-        : type === 'siding' ? [[0, h - 0.34], [0.05, h - 0.34], [0.05, h - 0.2], [0.3, h - 0.16], [0.33, h - 0.02], [0.33, h + PH], [-0.3, h + PH], [-0.3, h]]
+      : type === 'brick' && !gab ? [[0, h - 0.78], [0.06, h - 0.78], [0.06, h - 0.62], [0.13, h - 0.52], [0.13, h - 0.4], [0.3, h - 0.2], [0.36, h - 0.2], [0.36, h], [0.42, h + 0.06], [0.42, h + 0.16], [0.1, h + 0.16], [0.1, h + PH], [-0.3, h + PH], [-0.3, h]]
+        : type === 'siding' || gab ? [[0, h - 0.34], [0.05, h - 0.34], [0.05, h - 0.2], [0.3, h - 0.16], [0.33, h - 0.02], [0.33, h + PH], [-0.3, h + PH], [-0.3, h]]
           : [[0, h - 0.2], [0.07, h - 0.2], [0.07, h + PH - 0.08], [0.1, h + PH - 0.08], [0.1, h + PH], [-0.3, h + PH], [-0.3, h]];
     sweep(C.trim, crown, capCol, openE);
     sweep(C.trim, [[0, h], [0, h + PH], [-0.3, h + PH], [-0.3, h]], capCol, (i) => !info[i].open);
@@ -284,8 +301,27 @@ export function buildBuildings(map, group, occupy, isFree) {
     for (let i = 0; i < n; i++) { const j = (i + 1) % n, p = [pts[i].x - mit[i][0] * 0.3, pts[i].y - mit[i][1] * 0.3], q = [pts[j].x - mit[j][0] * 0.3, pts[j].y - mit[j][1] * 0.3]; C.core.quadN([[p[0], 0, p[1]], [q[0], 0, q[1]], [q[0], h - 0.05, q[1]], [p[0], h - 0.05, p[1]]], N4([en[i][0], 0, en[i][1]]), [1, 1, 1]); }
     for (const t of THREE.ShapeUtils.triangulateShape(pts, [])) { const p = pts[t[0]], q = pts[t[1]], r = pts[t[2]]; C.core.flat(p.x, p.y, q.x, q.y, r.x, r.y, r.x, r.y, h - 0.05, [1, 1, 1]); }
     const rc = ROOF[bi % ROOF.length];
-    for (const t of THREE.ShapeUtils.triangulateShape(pts, [])) { const p = pts[t[0]], q = pts[t[1]], r = pts[t[2]]; C.trim.flat(p.x, p.y, q.x, q.y, r.x, r.y, r.x, r.y, h, rc); }
-    if (fa > 130) {      // 屋顶设备：四个角都落在屋顶里面才放
+    if (gab) {
+      // 坡屋顶：沿屋脊线把轮廓切成两半，每半是一个斜面；屋脊两头的山墙补一个三角
+      const ca = Math.cos(gab[0]), sa = Math.sin(gab[0]), tv = pts.map(p => (p.x - cx) * -sa + (p.y - cz) * ca), t0 = (Math.min(...tv) + Math.max(...tv)) / 2, half = (Math.max(...tv) - Math.min(...tv)) / 2 || 1, sc = SHINGLE[bi % SHINGLE.length];
+      const yAt = (t) => h + 0.1 + gab[1] * Math.max(0, 1 - t / half);
+      for (const sg of [1, -1]) {
+        const poly = [];
+        for (let i = 0; i < n; i++) { const a = pts[i], c = pts[(i + 1) % n], ta = (tv[i] - t0) * sg, tb = (tv[(i + 1) % n] - t0) * sg; if (ta >= 0) poly.push([a.x, a.y, ta]); if ((ta >= 0) !== (tb >= 0)) { const k = ta / (ta - tb); poly.push([a.x + (c.x - a.x) * k, a.y + (c.y - a.y) * k, 0]); } }
+        if (poly.length < 3) continue;
+        for (const t of THREE.ShapeUtils.triangulateShape(poly.map(p => new THREE.Vector2(p[0], p[1])), [])) {
+          const P = t.map(k => [poly[k][0], yAt(poly[k][2]), poly[k][1]]), ux = P[1][0] - P[0][0], uy = P[1][1] - P[0][1], uz = P[1][2] - P[0][2], vx = P[2][0] - P[0][0], vy = P[2][1] - P[0][1], vz = P[2][2] - P[0][2];
+          let gx = uy * vz - uz * vy, gy = uz * vx - ux * vz, gz = ux * vy - uy * vx; const l = Math.hypot(gx, gy, gz) || 1; if (gy < 0) { gx = -gx; gy = -gy; gz = -gz; }
+          C.trim.quadN([P[0], P[1], P[2], P[2]], N4([gx / l, gy / l, gz / l]), sc);
+        }
+        for (let i = 0; i < poly.length; i++) {      // 山墙
+          const a = poly[i], c = poly[(i + 1) % poly.length], ya = yAt(a[2]), yc = yAt(c[2]); if ((a[2] < 0.01 && c[2] < 0.01) || (ya - h < 0.25 && yc - h < 0.25)) continue;
+          const L = Math.hypot(c[0] - a[0], c[1] - a[1]) || 1, ex = -(c[1] - a[1]) / L, ez = (c[0] - a[0]) / L;
+          G.quadN([[a[0], h, a[1]], [c[0], h, c[1]], [c[0], yc, c[1]], [a[0], ya, a[1]]], N4([ex, 0, ez]), col, [[0, h / TH], [L / TW, h / TH], [L / TW, yc / TH], [0, ya / TH]]);
+        }
+      }
+    } else for (const t of THREE.ShapeUtils.triangulateShape(pts, [])) { const p = pts[t[0]], q = pts[t[1]], r = pts[t[2]]; C.trim.flat(p.x, p.y, q.x, q.y, r.x, r.y, r.x, r.y, h, rc); }
+    if (fa > 130 && !gab) {      // 屋顶设备：四个角都落在屋顶里面才放
       const k = tall ? 2.2 : 1, sx = (2.6 + hash(bi * 3) * 2.4) * k, sz = (2.4 + hash(bi * 5) * 1.6) * k, sy3 = (2 + hash(bi * 9) * 1.4) * k;
       let best = 0, rot = 0; for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n], L = p.distanceTo(q); if (L > best) { best = L; rot = Math.atan2(q.y - p.y, q.x - p.x); } }
       const cr = Math.cos(rot), sr = Math.sin(rot), m = 0.8;

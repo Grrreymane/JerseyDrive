@@ -431,6 +431,7 @@ if (params.has('clay')) {
     o.material = clay;
   });
 }
+sky.setSkyline(raw.origin);
 world.updateLod(S.car.x, S.car.z); view.update(S.car, 0, 0); sky.update(view.camera, S.car.x, S.car.z); post.render(scene, view.camera);
 // 场景里几千个物体绝大多数不动：关掉每次渲染前的全场景矩阵刷新，会动的（自己的车、镜头、太阳）各自手动刷新
 scene.updateMatrixWorld(true); scene.matrixWorldAutoUpdate = false;

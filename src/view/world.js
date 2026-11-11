@@ -103,6 +103,14 @@ export function buildWorld(map, scene) {
     const tex = new THREE.CanvasTexture(cv2); tex.anisotropy = 8; world.waterCanvas = cv;
     const x0 = wt.x0, z0 = wt.z0, x1 = x0 + wt.w * wt.cell, z1 = z0 + wt.h * wt.cell, g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute([x0, CH, z0, x0, CH, z1, x1, CH, z1, x1, CH, z0], 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 1, 1], 2)); g.setIndex([0, 1, 2, 0, 2, 3]);
+    // 地图边上是水的地方（东边的哈德逊河），水面往外再铺 900 米，不然能看到水的尽头露出一条地面
+    { const d = c.getImageData(0, 0, wt.w, wt.h).data, on = (i, j) => d[(j * wt.w + i) * 4] > 127, E = new Geo(), OUT = 900;
+      const run = (len, test, emit) => { let s0 = -1; for (let k = 0; k <= len; k++) { const w = k < len && test(k); if (w && s0 < 0) s0 = k; if (!w && s0 >= 0) { if (k - s0 > 20) emit(s0 * wt.cell, k * wt.cell); s0 = -1; } } };
+      run(wt.h, j => on(wt.w - 2, j), (a, b) => E.flat(x1 - 8, z0 + a, x1 - 8, z0 + b, x1 + OUT, z0 + b, x1 + OUT, z0 + a, CH, [1, 1, 1]));
+      run(wt.h, j => on(1, j), (a, b) => E.flat(x0 - OUT, z0 + a, x0 - OUT, z0 + b, x0 + 8, z0 + b, x0 + 8, z0 + a, CH, [1, 1, 1]));
+      run(wt.w, i => on(i, wt.h - 2), (a, b) => E.flat(x0 + a, z1 - 8, x0 + a, z1 + OUT, x0 + b, z1 + OUT, x0 + b, z1 - 8, CH, [1, 1, 1]));
+      run(wt.w, i => on(i, 1), (a, b) => E.flat(x0 + a, z0 - OUT, x0 + a, z0 + 8, x0 + b, z0 + 8, x0 + b, z0 - OUT, CH, [1, 1, 1]));
+      if (E.i.length) add(E.build(), toonMat({ color: new THREE.Color('#4c82ad'), side: DS, depthFunc: THREE.AlwaysDepth, spec: 0.5 }), -29); }
     add(g, toonMat({ color: new THREE.Color('#4c82ad'), alphaMap: tex, alphaTest: 0.5, side: DS, depthFunc: THREE.AlwaysDepth, spec: 0.5 }), -29);
   }
 

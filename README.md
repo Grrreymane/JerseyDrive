@@ -136,3 +136,11 @@ node tools/cdp.mjs "http://127.0.0.1:8765/?style=cel&fly&v=8&len=260&q=0" --vide
 - 水面（Hudson、Hackensack、Passaic、Newark Bay）：`build_map.mjs` 把海岸线和水面多边形栅格化成 6 米一格（海岸线不闭合，用“画墙 → 连通块 → 左右投票”判断哪边是水），3D 里是一张带透明度贴图的平面，大地图和车内导航屏上也画。
 - 数据覆盖有限：4 万栋楼里约 4600 栋有门牌、约 1100 个店名、约 1000 栋有真实层数，其余仍是按类型和占地猜的。
 - 真实楼高：`python -m overturemaps download --bbox=-74.192,40.708,-74.03,40.75 -f geojsonseq --type=building -o tools/raw/overture_all.geojsonl`（Overture Maps，不进仓库）。`build_map.mjs` 按 OSM way 编号对上，OSM 自己没标高度的楼用它的：4 万栋里约 2.4 万栋有了真实高度（原来约 1000 栋）。不到 6.2 米的矮楼整个高度算一层。
+
+### 第九轮：激光雷达楼高和坡屋顶、街区风格、曼哈顿天际线
+
+- 激光雷达：`python tools/lidar_fetch.py all`（USGS 公开点云，EPT 格式，2014 年的数据，约 1.2 亿个点，三分钟）→ 1 米一格的高度图；`python tools/lidar_buildings.py all` 按每栋楼的轮廓算离地高度，并判断平顶 / 坡顶（屋脊方向、檐口高、屋脊高出多少）→ `tools/raw/lidar/roofs_all.json`；`build_map.mjs` 并入。高度优先级：OSM 标注 > 雷达 > Overture。4 万栋里 3.9 万栋用上了实测高度，2788 栋是坡屋顶（建筑数据里多了 `rg: [屋脊方向, 屋脊高出檐口]`）。中间文件都在 `tools/raw/lidar/`，不进仓库。
+- 坡屋顶（`buildings.js`）：沿屋脊线把轮廓切两半，各一个斜面，两头补山墙。
+- 街区风格（`buildings.js` 的 `DISTRICTS`）：按经纬度分片区定挂板 / 砖 / 抹灰的比例和砖的色板。JC 市中心和 Hoboken 以褐石、深红砖为主，Heights、JSQ 以西、Kearny、Newark 住宅区以挂板房为主，水边多抹灰和玻璃。
+- 曼哈顿天际线（`sky.js` 的 `buildSkyline`）：河对岸一面南北向的剪影布景，摆在真实方位，主要高楼按真实高度画；越往西越淡，到 Newark 看不见。水面在地图东边往外多铺 900 米。
+

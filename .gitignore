@@ -4,3 +4,4 @@ shots/
 samples/
 tools/raw/osm_*.json
 tools/raw/overture_*
+tools/raw/lidar/
