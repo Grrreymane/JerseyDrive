@@ -62,3 +62,19 @@ button.ghost { background: rgba(255, 255, 255, 0.07); color: var(--text); font-w
 .sign { display: flex; gap: 11px; align-items: center; background: rgba(255, 255, 255, 0.04); border-radius: 10px; padding: 8px 11px; } .sign img { width: 62px; height: 62px; flex: none; } .sign.dark img { background: #3d3e42; border-radius: 6px; }
 .sign b { font-size: 14px; } .sign em { font-style: normal; color: var(--dim); font-size: 11px; margin-left: 6px; letter-spacing: 0.02em; } .sign p { margin: 2px 0 0; font-size: 12.5px; color: #cfd3d9; line-height: 1.45; }
 @media (max-width: 900px) { #keys { display: none; } .cols { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(2, 1fr); } #coach { max-width: 70vw; } }
+
+/* 课程目标（左上角） */
+#lessonBox { position: absolute; bottom: 92px; left: 16px; width: 270px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; font-size: 13px; }
+#lessonBox b { display: block; font-size: 14px; margin-bottom: 4px; } #lessonBox div { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; color: var(--dim); }
+#lessonBox div.ok { color: #58d68d; } #lessonBox div.bad { color: #ff7b72; }
+#lessonList { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; margin: 4px 0 16px; }
+#lessonList button { text-align: left; padding: 9px 12px; font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; } #lessonList button span { color: #e0a030; letter-spacing: 1px; white-space: nowrap; }
+#ldStars { font-size: 34px; letter-spacing: 6px; color: #e0a030; text-align: center; margin: 2px 0 8px; }
+/* 碰撞：四周泛红 + 一行大字，1.7 秒后退回去 */
+#hit { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; opacity: 0; transition: opacity 0.5s; background: radial-gradient(ellipse at center, rgba(200, 20, 20, 0) 35%, rgba(190, 15, 15, 0.75) 100%); }
+#hit.on { opacity: 1; transition: opacity 0.06s; } #hitMsg { font-size: 44px; font-weight: 800; color: #fff; text-shadow: 0 3px 18px rgba(0, 0, 0, 0.7); }
+/* 大地图 */
+#bigmap { position: fixed; inset: 0; z-index: 30; background: #e8eaed; cursor: grab; } #bigmap.hidden { display: none; } #bigmap:active { cursor: grabbing; }
+#bigCanvas { width: 100%; height: 100%; display: block; }
+#bigHint { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: rgba(32, 33, 36, 0.86); color: #fff; padding: 7px 16px; border-radius: 20px; font-size: 13px; pointer-events: none; }
+@media (max-width: 900px) { #lessonList { grid-template-columns: 1fr; } #lessonBox { width: 220px; } }

@@ -8,7 +8,7 @@ export const PENALTY = {
   no_yield: 15, no_yield_ped: 15, hit_ped: 30, hit_car: 20,
   speeding: 8, no_signal: 5, late_signal: 2, wrong_lane_from: 5, wrong_lane_into: 5, lane_no_signal: 4, over_line: 3,
 };
-const SEV = { good_stop: 'good', good_ror: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor' };
+const SEV = { good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor' };
 
 export function makeRules() {
   return {
@@ -60,13 +60,16 @@ export function stepRules(R, car, map, t, dt, T = null) {
 
   // 撞到停着的车 / 开出路面
   if (map.hitParked(c.x, c.z, car.h, CAR.L / 2, CAR.W / 2)) { emit(R, 'crash', car, t, street); R.needReset = {}; return; }
-  R.alert = null;
+  R.alert = null; const sp0 = Math.abs(car.v);
   if (T) {
     const k = playerContacts(T, { x: c.x, z: c.z, h: car.h, v: car.v });
-    if (k.ped) { emit(R, 'hit_ped', car, t, street); k.ped.flagged = true; R.needReset = { back: true }; return; }
-    if (k.car) { emit(R, 'hit_car', car, t, street); R.needReset = { back: true }; return; }
+    if (k.ped) { emit(R, 'hit_ped', car, t, street); k.ped.flagged = true; k.ped.mode = 'down'; k.ped.downT = 0; k.ped.onRoad = false; R.needReset = { back: true }; return; }
+    if (k.car) { emit(R, 'hit_car', car, t, street); k.car.hitT = 6; k.car.v = 0; R.needReset = { back: true }; return; }
     if (k.closePed) { k.closePed.flagged = true; emit(R, 'no_yield_ped', car, t, street); }
     if (pedAhead(T, { x: c.x, z: c.z, h: car.h }, 32)) R.alert = 'ped';
+    // 为行人停过车，等人走了再走：记一次“礼让行人”
+    if (R.alert === 'ped') { if (sp0 < 0.2) R.yieldStop = true; R.yieldSeen = t; }
+    else if (R.yieldStop && t - R.yieldSeen > 0.4) { R.yieldStop = false; emit(R, 'good_yield', car, t, street); }
   }
   if (!map.onRoad(c.x, c.z, 0.3)) {
     const dead = (loc.s < 1 && !seg.ja) || (loc.s > seg.len - 1 && !seg.jb);
@@ -178,6 +181,7 @@ function finishJunction(R, E, seg, car, t) {
     if (type === 'left' && E.state !== 'R' && E.th.oncoming) { emit(R, 'no_yield', car, t, name, { why: 'oncoming' }); E.viol = true; }
     else if (type === 'right' && E.state === 'R' && E.th.cross) { emit(R, 'no_yield', car, t, name, { why: 'cross' }); E.viol = true; }
   }
+  if (E.j.control === 'signal' && E.state !== 'R' && !E.viol) emit(R, 'good_signal', car, t, name);
   const laneOk = E.lane.side !== 'ok' || E.lane.n < 2 || allowedFrom(E.seg, E.fwd, E.lane, type);
   if (!laneOk) emit(R, 'wrong_lane_from', car, t, name, { turn: type });
   if (type === 'left' || type === 'right') {

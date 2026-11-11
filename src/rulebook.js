@@ -20,6 +20,7 @@ export const EVENT_TEXT = {
     : e.why === 'first' ? { title: '抢了先到的车', body: '全向停车（ALL WAY）按到达顺序走：谁先停稳谁先走；同时到，让右手边的车。对方先停下了，就等它过去。' }
     : e.why === 'inJ' ? { title: '路口里还有车就开进去了', body: '停稳之后先看路口里面：已经在路口里的车有路权，等它开出去再走。' }
     : { title: '没有让横向来车', body: '你这边有 STOP（或红灯右转），横向的车不用停。停稳后往左、往右、再往左看，来车离得近就等它过去。' },
+  good_yield: () => ({ title: '礼让行人 ✓', body: '停在斑马线前，等人走过去再起步。' }),
   no_yield_ped: () => ({ title: '没有礼让斑马线上的行人', body: '新泽西州：行人在斑马线上时，车必须停下并保持停住，等人走过你这半边路。转弯时尤其要先看要开进去的那条路的斑马线。' }),
   hit_ped: () => ({ title: '撞到行人', body: '最严重的事故。接近路口和斑马线时脚先移到刹车上，车速降到随时能停下来。' }),
   hit_car: () => ({ title: '撞到别的车', body: '和前车保持至少 3 秒车距；进路口前确认横向和对向的车离得够远。' }),
@@ -34,7 +35,7 @@ export const EVENT_SHORT = {
   red_light: '闯红灯', stop_sign: 'STOP 没停', rolling_stop: 'STOP 没停稳', over_line: '越过停止线', wrong_way: '单行道逆行', wrong_side: '压到对向车道', speeding: '超速',
   no_yield: '没让有路权的车', no_yield_ped: '没礼让行人', hit_ped: '撞到行人', hit_car: '撞到别的车',
   no_signal: '转弯没打灯', late_signal: '打灯太晚', wrong_lane_from: '转弯起始车道不对', wrong_lane_into: '转弯后进错车道', lane_no_signal: '变道没打灯', crash: '碰撞', off_road: '开上人行道',
-  good_stop: 'STOP 完全停稳', good_ror: '红灯右转正确', good_turn: '转弯规范',
+  good_yield: '礼让行人', good_stop: 'STOP 完全停稳', good_ror: '红灯右转正确', good_turn: '转弯规范',
 };
 
 /** 教练提示（接近路口时） */

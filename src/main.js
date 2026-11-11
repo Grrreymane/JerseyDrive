@@ -12,6 +12,7 @@ import { buildCarView } from './view/carview.js';
 import { signDataURL, shortName } from './view/signs.js';
 import { EVENT_TEXT, EVENT_SHORT, hintText, ALERT_TEXT, SIGN_BOOK, SHIFT_MSG } from './rulebook.js';
 import { makeAudio } from './view/audio.js';
+import { LESSONS, lessonState } from './lessons.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -60,15 +61,18 @@ const startPose = (() => {
   return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h };
 })();
 function placeCar(p) { Object.assign(S.car, { x: p.x, z: p.z, h: p.h, v: 0, steer: 0 }); clearTransient(S.R); S.R.needReset = null; }
-function restart() { S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; T = makeTraffic(map); placeCar(startPose); $('toasts').innerHTML = ''; }
+function restart() { S.crash = null; $('hit').classList.remove('on'); S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; T = makeTraffic(map); placeCar(startPose); $('toasts').innerHTML = ''; }
 restart();
 
 // ---------- 输入 ----------
+let lookHold = 0;
 const keys = new Set(); const inp = { throttle: 0, brake: 0, steer: 0, analog: false }; let padPrev = [];
 const GEAR_KEY = { Digit1: 'P', Digit2: 'R', Digit3: 'N', Digit4: 'D' };
 addEventListener('keydown', (e) => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
   if (e.repeat) return; keys.add(e.code); audio.unlock();
+  if (e.code === 'KeyM' && S.running) return toggleBig();
+  if (bigOpen) { if (e.code === 'Escape') toggleBig(); return; }
   if (e.code === 'Escape') return toggleMenu();
   if (!S.running || S.paused) { if (e.code === 'Enter' && !S.running && !$('btnStart').disabled) start(); return; }
   if (e.code === 'KeyQ') setSignal(S.car, -1);
@@ -78,7 +82,6 @@ addEventListener('keydown', (e) => {
   else if (e.code === 'KeyC') view.mode = { cockpit: 'chase', chase: 'top', top: 'cockpit' }[view.mode];
   else if (e.code === 'KeyT') { S.coach = !S.coach; toast({ sev: 'info' }, S.coach ? '教练提示：开' : '教练提示：关', '', 1800); }
   else if (e.code === 'KeyG') openBook();
-  else if (e.code === 'KeyV') applyStyle(styleIdx + 1, true);
   else if (e.code === 'KeyO') { post.outline = !post.outline; post.setStyle(STYLES[styleIdx]); toast({ sev: 'info' }, post.outline ? '描边：开' : '描边：关', '', 1800); }
   else if (e.code === 'Backspace') S.R.needReset = {};
   else if (e.code === 'KeyH') audio.horn();
@@ -111,8 +114,9 @@ function readInput(dt) {
     inp.brake += Math.max(-6 * dt, Math.min(3.2 * dt, brkT - inp.brake));
   }
   inp.steer = steer; inp.analog = analog;
-  const L = k('KeyZ'), Rr = k('KeyX');
-  return L && Rr ? Math.PI : L ? -1.3 : Rr ? 1.3 : 0;
+  // 右后视镜在正前方视野外面：按 X 先转到正对右镜（约 54°），按住超过半秒再继续转成回头看右后方盲区
+  const L = k('KeyZ'), Rr = k('KeyX'); lookHold = Rr && !L ? lookHold + dt : 0;
+  return L && Rr ? Math.PI : L ? -1.3 : Rr ? (lookHold > 0.55 ? 1.5 : 0.94) : 0;
 }
 
 // ---------- 界面 ----------
@@ -223,7 +227,7 @@ function start() { show('start', false); show('hud', true); S.running = true; se
 $('btnStart').onclick = start;
 $('btnResume').onclick = () => { show('pause', false); setPaused(false); };
 $('btnReset').onclick = () => { S.R.needReset = {}; show('pause', false); setPaused(false); };
-$('btnRestart').onclick = () => { restart(); show('pause', false); setPaused(false); };
+$('btnRestart').onclick = () => { if (lesson) startLesson(lesson.i); else { restart(); show('pause', false); setPaused(false); } };
 $('btnReport').onclick = () => { openReport(); };
 $('btnBook').onclick = () => openBook();
 $('btnReportClose').onclick = () => { show('report', false); show('pause', true); };
@@ -265,7 +269,20 @@ function simStep(lookT) {
   if (trafficOn) stepActors(DT);
   stepRules(S.R, S.car, map, S.t, DT, trafficOn ? T : null); S.t += DT; S.driveTime += DT;
   showEvents();
+  if (trafficOn && lesson && S.R.cur && S.R.cur.seg.speed >= 35) { const mph = Math.abs(S.car.v) * MPH; if (mph >= 22 && mph <= S.R.cur.seg.speed + 3.5) lesson.fast += Math.abs(S.car.v) * DT; }
   if (S.R.needReset) {
+    // 撞了：先停在原地 1.7 秒（泛红、闷响、被撞的人倒地、被撞的车打双闪），再退回去
+    const hit = S.R.events.find(e => e.type === 'crash' || e.type === 'hit_car' || e.type === 'hit_ped');
+    if (hit) {
+      S.crash = { t: 1.7, reset: S.R.needReset }; S.R.needReset = null; S.car.v = 0; audio.crash(hit.type !== 'hit_ped');
+      $('hitMsg').textContent = hit.type === 'hit_ped' ? '撞到行人' : hit.type === 'hit_car' ? '撞车了' : '碰到停着的车'; $('hit').classList.add('on');
+      return;
+    }
+    doReset();
+  }
+}
+function doReset() {
+  {
     const flip = S.R.needReset.flip, c = S.car, back = S.R.needReset.back ? 9 : 0;      // 撞了车或人：退回去 9 米，并把贴得太近的车清掉
     const p = map.snapToLane(c.x + Math.cos(c.h) * (CAR.center - back), c.z + Math.sin(c.h) * (CAR.center - back), c.h + (flip ? Math.PI : 0)) || startPose;
     if (back) T.cars = T.cars.filter(o => Math.hypot(o.x - p.x, o.z - p.z) > 16);
@@ -294,7 +311,10 @@ function tick(now) {
   const dt = Math.max(0, Math.min(0.1, (now - prev) / 1000)); prev = now;
   if (window.__jd.freeze) { window.__jd.freeze(); requestAnimationFrame(tick); return; }      // 调试：停住画面，手动摆镜头截图
   if (S.fly) flyStep(dt);
-  else if (S.running && !S.paused) {
+  else if (S.running && !S.paused && S.crash) {
+    S.crash.t -= dt; S.t += dt; if (trafficOn) stepActors(dt);
+    if (S.crash.t <= 0) { S.R.needReset = S.crash.reset; S.crash = null; $('hit').classList.remove('on'); doReset(); }
+  } else if (S.running && !S.paused) {
     if (!qualityLocked && quality < 2 && dt < 0.1) { ftSum += dt; if (++ftN >= 120) { if (ftSum / ftN > 0.024) lowerQuality(); ftSum = ftN = 0; } }
     lookT = readInput(dt); acc += dt;
     while (acc >= DT) { simStep(); acc -= DT; }
@@ -302,11 +322,11 @@ function tick(now) {
   world.updateSignals(S.t);
   view.update(S.car, lookT, dt);
   audio.engine(S.running && !S.paused ? S.car : null);
-  if (S.running) { updateHud(); if (frame % 3 === 0) drawMini(); }
+  if (S.running) { updateHud(); if (frame % 3 === 0) drawMini(); if (frame % 10 === 0) lessonTick(); }
   if (frame % 6 === 0) world.updateLod(S.car.x, S.car.z);
   world.stream(S.car.x, S.car.z);
   sky.update(view.camera, S.car.x, S.car.z);
-  if (trafficOn) actors.update(T);
+  if (trafficOn) actors.update(T, S.t);
   view.renderMirrors(); post.render(scene, view.camera);
   frame++; requestAnimationFrame(tick);
 }
@@ -386,3 +406,119 @@ if (params.has('fly') || params.has('bench')) {
   window.__jd.fly(+(params.get('v') || 9), +(params.get('len') || 300), params.has('bench'));
 }
 window.__jd.ready = true;
+
+// ---------- 课程 ----------
+let lesson = null, stars = {};
+try { stars = JSON.parse(localStorage.getItem('jdLessons') || '{}'); } catch { /* 存不了就不记 */ }
+/** 出发点：离地图中心最近、符合这节课要求的地方 */
+function findStart(kind) {
+  if (kind === 'default') return startPose;
+  let best = null, bd = 1e9;
+  if (kind === 'fast') {
+    for (const s of map.segs) { if (s.speed < 35 || s.useLen < 220) continue; const d = Math.hypot(s.px[0], s.pz[0]); if (d < bd) { bd = d; best = s; } }
+    if (!best) return startPose;
+    const q = offsetPoint(best, best.trimA + 20, laneCenter(best, true, best.lf - 1), {}), h = Math.atan2(q.dz, q.dx);
+    return { x: q.x - Math.cos(h) * CAR.center, z: q.z - Math.sin(h) * CAR.center, h };
+  }
+  for (const j of map.juncs) {
+    if (kind === 'allway' ? j.control !== 'allway' : j.control !== 'signal') continue;
+    for (const l of j.legs) {
+      if (!l.approach || l.segRef.useLen < 90 || l.segRef.speed > 30 || (kind === 'allway' && !l.stop)) continue;
+      const d = Math.hypot(j.cx, j.cz); if (d < bd) { bd = d; best = l; }
+    }
+  }
+  if (!best) return startPose;
+  return map.snapToLane(best.ex + best.ox * 70, best.ez + best.oz * 70, Math.atan2(-best.oz, -best.ox)) || startPose;
+}
+function startLesson(i) {
+  const def = LESSONS[i]; restart(); placeCar(findStart(def.start));
+  lesson = { i, def, log0: 0, odo0: 0, fast: 0, over: false };
+  for (const id of ['start', 'pause', 'lessonDone']) show(id, false); start(); lessonTick();
+  toast({ sev: 'info' }, `第 ${i + 1} 课：${def.title}`, def.brief, 12000);
+}
+function endLesson() { lesson = null; show('lessonBox', false); }
+let lessonKey = '';
+function lessonTick() {
+  if (!lesson) { show('lessonBox', false); return; }
+  const st = lessonState(lesson, S.R, S.car), key = st.rows.map(r => r.cur).join() + st.failed;
+  if (key !== lessonKey) {
+    lessonKey = key; show('lessonBox', true);
+    $('lessonBox').innerHTML = `<b>第 ${lesson.i + 1} 课　${lesson.def.title}</b>` + st.rows.map(r => `<div class="${r.done ? 'ok' : ''}"><span>${r.done ? '✓' : '○'} ${r.text}</span><span>${r.k === 'score' ? r.cur : r.cur + ' / ' + r.n}</span></div>`).join('');
+  }
+  if (lesson.over || S.crash) return;
+  const forbidHit = st.failed && st.failed !== 'score';
+  if (!st.done && !forbidHit && st.failed !== 'score') return;
+  lesson.over = true; setPaused(true);
+  const ok = st.done && !st.failed, n = !ok ? 0 : st.penalty === 0 ? 3 : st.penalty <= 10 ? 2 : 1;
+  if (ok) { stars[lesson.i] = Math.max(stars[lesson.i] || 0, n); try { localStorage.setItem('jdLessons', JSON.stringify(stars)); } catch { /* 同上 */ } }
+  $('ldTitle').textContent = ok ? `第 ${lesson.i + 1} 课 通过` : '这一课没过';
+  $('ldStars').textContent = ok ? '★'.repeat(n) + '☆'.repeat(3 - n) : '';
+  $('ldText').textContent = ok ? (st.penalty ? `过程中扣了 ${st.penalty} 分。扣分项在“复盘”里能看到，零扣分是三星。` : '全程零扣分。')
+    : st.failed === 'score' ? `目标都完成了，但得分只有 ${100 - st.penalty}，要 80 以上。看一下复盘里扣分的地方再来。` : `这节课不能出现：${EVENT_SHORT[st.failed] || st.failed}。再来一次。`;
+  $('btnLdNext').style.display = ok && lesson.i < LESSONS.length - 1 ? '' : 'none';
+  show('lessonDone', true); if (ok) audio.good(); else audio.bad();
+}
+function buildLessonList() {
+  $('lessonList').innerHTML = LESSONS.map((l, i) => `<button class="ghost" data-i="${i}"><b>${i + 1}. ${l.title}</b><span>${'★'.repeat(stars[i] || 0)}</span></button>`).join('');
+  for (const b of $('lessonList').children) b.onclick = () => { audio.unlock(); startLesson(+b.dataset.i); };
+}
+buildLessonList();
+$('btnLdNext').onclick = () => startLesson(lesson.i + 1);
+$('btnLdRetry').onclick = () => startLesson(lesson.i);
+$('btnLdFree').onclick = () => { endLesson(); show('lessonDone', false); setPaused(false); };
+const toMenu = () => { endLesson(); buildLessonList(); for (const id of ['lessonDone', 'pause', 'hud']) show(id, false); show('start', true); S.running = false; setPaused(true); };
+$('btnLdMenu').onclick = toMenu; $('btnLessons').onclick = toMenu;
+if (params.has('lesson')) startLesson(Math.max(0, Math.min(LESSONS.length - 1, +params.get('lesson') - 1)));
+
+// ---------- 大地图（M）：上北下南，拖动平移，滚轮缩放 ----------
+let bigOpen = false; const bm = { x: 0, z: 0, s: 1 }, bigCv = $('bigCanvas'), bg = bigCv.getContext('2d');
+function toggleBig() {
+  bigOpen = !bigOpen; $('bigmap').classList.toggle('hidden', !bigOpen);
+  if (bigOpen) { bm.x = S.car.x; bm.z = S.car.z; bm.s = 0.9; setPaused(true); drawBig(); } else if ($('pause').classList.contains('hidden') && $('lessonDone').classList.contains('hidden')) setPaused(false);
+}
+function drawBig() {
+  const pr = Math.min(devicePixelRatio, 2), W = innerWidth, H = innerHeight; if (bigCv.width !== W * pr) { bigCv.width = W * pr; bigCv.height = H * pr; }
+  const s = bm.s, c = bg, X = (x) => (x - bm.x) * s + W / 2, Z = (z) => (z - bm.z) * s + H / 2, vis = (x, z, m) => X(x) > -m && X(x) < W + m && Z(z) > -m && Z(z) < H + m;
+  c.setTransform(pr, 0, 0, pr, 0, 0); c.fillStyle = '#e8eaed'; c.fillRect(0, 0, W, H); c.lineCap = 'round'; c.lineJoin = 'round';
+  c.fillStyle = '#c3e6c1'; for (const f of map.raw.parks) { c.beginPath(); for (let i = 0; i < f.length; i += 2) c[i ? 'lineTo' : 'moveTo'](X(f[i]), Z(f[i + 1])); c.fill(); }
+  if (s > 0.8) { c.fillStyle = '#d8dade'; for (const b of map.buildings) { if (b.skip || !vis((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, 60)) continue; c.beginPath(); for (let i = 0; i < b.n; i++) c[i ? 'lineTo' : 'moveTo'](X(b.pts[2 * i]), Z(b.pts[2 * i + 1])); c.fill(); } }
+  const big = (g) => g.cls === 'motorway' || g.cls === 'trunk' || g.cls === 'primary', mid = (g) => g.cls === 'secondary';
+  for (const pass of [0, 1]) for (const g of map.segs) {      // 先画一圈深色的边，再画路面：主干道黄色，其余白色
+    if (!vis(g.px[g.n >> 1], g.pz[g.n >> 1], g.len * s + 40)) continue;
+    const w = Math.max(big(g) ? 3.4 : mid(g) ? 2.6 : 1.8, g.halfW * 2 * s);
+    c.lineWidth = pass ? w : w + 2; c.strokeStyle = pass ? (big(g) ? '#fbd56b' : mid(g) ? '#fdeeb5' : '#ffffff') : (big(g) ? '#e0a52a' : '#c4c7cc');
+    c.beginPath(); c.moveTo(X(g.px[0]), Z(g.pz[0])); for (let i = 1; i < g.n; i++) c.lineTo(X(g.px[i]), Z(g.pz[i])); c.stroke();
+  }
+  if (s > 1.1) { c.fillStyle = '#8a8f98'; for (const g of map.segs) {      // 单行道箭头
+    if (!g.oneway || g.len < 40 || !vis(g.px[g.n >> 1], g.pz[g.n >> 1], 20)) continue;
+    const q = offsetPoint(g, g.len / 2, 0, {}); c.save(); c.translate(X(q.x), Z(q.z)); c.rotate(Math.atan2(q.dz, q.dx)); c.beginPath(); c.moveTo(6, 0); c.lineTo(-4, -4); c.lineTo(-4, 4); c.fill(); c.restore();
+  } }
+  if (s > 0.7) for (const j of map.juncs) {      // 红绿灯、STOP
+    if (j.control === 'joint' || j.control === 'none' || !vis(j.cx, j.cz, 10)) continue; const x = X(j.cx), z = Z(j.cz);
+    if (j.control === 'signal') { c.fillStyle = '#202124'; c.fillRect(x - 3.5, z - 7, 7, 14); for (const [k, col] of [[-4, '#ff4b3e'], [0, '#ffc21a'], [4, '#2ee06a']]) { c.fillStyle = col; c.beginPath(); c.arc(x, z + k, 1.7, 0, 7); c.fill(); } }
+    else { c.fillStyle = '#d0121f'; c.beginPath(); for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; c[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * 5, z + Math.sin(a) * 5); } c.fill(); }
+  }
+  // 路名：沿路写，同名的隔一段才再写一次
+  c.font = '600 12px Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineWidth = 3; const used = new Set();
+  for (const g of map.segs) {
+    if (!g.name || g.len * s < 110 || !vis(g.px[g.n >> 1], g.pz[g.n >> 1], 0)) continue;
+    const q = offsetPoint(g, g.len / 2, 0, {}), k = g.name + Math.round(X(q.x) / 260) + ',' + Math.round(Z(q.z) / 260); if (used.has(k)) continue; used.add(k);
+    let a = Math.atan2(q.dz, q.dx); if (a > Math.PI / 2 || a < -Math.PI / 2) a += Math.PI;
+    c.save(); c.translate(X(q.x), Z(q.z)); c.rotate(a); c.strokeStyle = 'rgba(255,255,255,0.9)'; c.strokeText(shortName(g.name), 0, 0); c.fillStyle = '#3c4043'; c.fillText(shortName(g.name), 0, 0); c.restore();
+  }
+  // 自己的车
+  c.save(); c.translate(X(S.car.x), Z(S.car.z)); c.rotate(S.car.h + Math.PI / 2); c.fillStyle = 'rgba(66,133,244,0.22)'; c.beginPath(); c.arc(0, 0, 20, 0, 7); c.fill();
+  c.fillStyle = '#4285f4'; c.strokeStyle = '#fff'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(0, -12); c.lineTo(8, 9); c.lineTo(0, 5); c.lineTo(-8, 9); c.closePath(); c.fill(); c.stroke(); c.restore();
+  // 比例尺
+  const m = [50, 100, 200, 500, 1000].find(v => v * s > 70) || 1000; c.fillStyle = '#3c4043'; c.fillRect(20, H - 30, m * s, 3); c.textAlign = 'left'; c.font = '600 12px Arial'; c.fillText(m + ' 米', 20, H - 40);
+}
+{
+  let drag = null; const el = $('bigmap');
+  el.addEventListener('pointerdown', (e) => { drag = [e.clientX, e.clientY]; el.setPointerCapture(e.pointerId); });
+  el.addEventListener('pointermove', (e) => { if (!drag) return; bm.x -= (e.clientX - drag[0]) / bm.s; bm.z -= (e.clientY - drag[1]) / bm.s; drag = [e.clientX, e.clientY]; drawBig(); });
+  el.addEventListener('pointerup', () => { drag = null; });
+  el.addEventListener('wheel', (e) => { e.preventDefault(); const k = Math.exp(-e.deltaY * 0.0015), s1 = Math.max(0.12, Math.min(6, bm.s * k)), dx = e.clientX - innerWidth / 2, dz = e.clientY - innerHeight / 2; bm.x += dx / bm.s - dx / s1; bm.z += dz / bm.s - dz / s1; bm.s = s1; drawBig(); }, { passive: false });
+  addEventListener('resize', () => { if (bigOpen) drawBig(); });
+}
+window.__jd.toggleBig = toggleBig; window.__jd.startLesson = startLesson;
+window.__jd.traffic = () => T;

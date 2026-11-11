@@ -113,7 +113,9 @@ export function stepTraffic(T, pl, t, dt) {
   const cur = pl.cur, pj = cur && cur.junc;
 
   // ---------- 行人 ----------
+  for (let i = peds.length - 1; i >= 0; i--) if (peds[i].mode === 'down' && (peds[i].downT += dt) > 9) peds.splice(i, 1);
   for (const p of peds) {
+    if (p.mode === 'down') continue;
     const seg = p.seg, sA = seg.trimA + XW, sB = seg.len - seg.trimB - XW;
     if (p.mode === 'walk') {
       p.s += p.dir * p.sp * dt; p.lat = p.side * p.off;
@@ -136,11 +138,12 @@ export function stepTraffic(T, pl, t, dt) {
     }
     offsetPoint(seg, p.s, p.lat, P); p.x = P.x; p.z = P.z; p.onRoad = Math.abs(p.lat) < seg.halfW;
     p.h = p.mode === 'walk' ? Math.atan2(P.dz, P.dx) + (p.dir > 0 ? 0 : Math.PI) : Math.atan2(-p.side * P.dx, p.side * P.dz);
-    p.ph += (p.mode === 'wait' ? 0 : p.sp) * dt * 4.4;
+    p.ph += (p.mode === 'wait' ? 0 : p.sp) * dt * 4.6; p.moving = p.mode !== 'wait';
   }
 
   // ---------- 车 ----------
   for (const c of cars) {
+    if (c.hitT > 0) { c.hitT -= dt; c.v = 0; continue; }
     const seg = c.seg; let vmax = seg.speed / MPH * 0.88, gap = 1e9;
     const hx = Math.cos(c.h), hz = Math.sin(c.h);
     // 前面的东西：同车道的车、路口里刚进去的车、玩家

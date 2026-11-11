@@ -72,10 +72,4 @@ export const STYLES = [
     line: { w: 1.5, ink: [0.09, 0.085, 0.17], k: 0.85, crease: 1 }, sat: 1.1, contrast: 1.05, halftone: 0, spec: 1, rim: 0.35, rimColor: [1, 1, 1],
     sky: ['#2f7fe6', '#7fc0f5', '#d6ecfb'], cloud: ['#ffffff', '#c4dcf3'],
   },
-  {
-    id: 'flat', name: '干净无描边', desc: '两段明暗 · 不描线 · 最接近原来的清爽感',
-    ramp: [[-1, 0], [-0.05, 0.55], [0.3, 1]], soft: 0, lit: [1.03, 1.0, 0.96], shade: [0.55, 0.6, 0.84], sunDir: [-0.52, 0.8, 0.44],
-    line: { w: 1, ink: [0, 0, 0], k: 0, crease: 0 }, sat: 1.12, contrast: 1.04, halftone: 0, spec: 0.9, rim: 0.3, rimColor: [1, 1, 1],
-    sky: ['#2f7fe6', '#7fc0f5', '#d6ecfb'], cloud: ['#ffffff', '#c4dcf3'],
-  },
 ];

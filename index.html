@@ -34,15 +34,19 @@
   </div>
 
   <canvas id="mini" width="220" height="220"></canvas>
-  <div id="keys">W 油门　S 刹车　空格 急刹　A/D 方向　Q/E 转向灯　1–4 挡位　Z/X 左右看　C 视角　V 画风　O 描边　T 教练　G 图鉴　Esc 菜单</div>
+  <div id="keys">W 油门　S 刹车　空格 急刹　A/D 方向　Q/E 转向灯　1–4 挡位　Z/X 左右看　C 视角　M 地图　T 教练　G 图鉴　Esc 菜单</div>
   <div id="attr">地图数据 © OpenStreetMap contributors</div>
+  <div id="lessonBox" class="hidden"></div>
+  <div id="hit"><b id="hitMsg"></b></div>
   <div id="flash"></div>
 </div>
 
 <div id="start" class="overlay">
   <div class="card">
     <h1>泽西城练车</h1>
-    <p class="lead">Jersey City 市中心的真实街道：单行道、红绿灯、STOP 都按实际位置摆放。现在路上没有别的车，放心慢慢开，教练会在旁边提醒。</p>
+    <p class="lead">Jersey City 的真实街道：单行道、红绿灯、STOP 都按实际位置摆放，路上有别的车和行人。跟着课程一节节练，或者直接自由练习，教练会在旁边提醒。</p>
+    <h3>课程</h3>
+    <div id="lessonList"></div>
     <div class="cols">
       <div>
         <h3>开车</h3>
@@ -57,9 +61,9 @@
       <div>
         <h3>观察</h3>
         <table>
-          <tr><td><kbd>Z</kbd> <kbd>X</kbd></td><td>向左 / 向右看（一起按 = 回头）</td></tr>
+          <tr><td><kbd>Z</kbd> <kbd>X</kbd></td><td>向左看 / 看右后视镜（按住 X 回头看右后方；一起按 = 回头）</td></tr>
           <tr><td><kbd>C</kbd></td><td>切换视角：车内 / 车后 / 俯视</td></tr>
-          <tr><td><kbd>V</kbd></td><td>切换画风（2 种）　<kbd>O</kbd> 描边开关</td></tr>
+          <tr><td><kbd>M</kbd></td><td>大地图（拖动、滚轮缩放）</td></tr>
           <tr><td><kbd>T</kbd></td><td>教练提示 开 / 关</td></tr>
           <tr><td><kbd>G</kbd></td><td>标志图鉴</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>暂停 / 复盘</td></tr>
@@ -79,8 +83,22 @@
     <button id="btnBook" class="ghost">标志图鉴</button>
     <button id="btnReset" class="ghost">把车摆回车道</button>
     <button id="btnRestart" class="ghost">回到起点重新开始</button>
+    <button id="btnLessons" class="ghost">课程表</button>
   </div>
 </div>
+
+<div id="lessonDone" class="overlay hidden">
+  <div class="card narrow">
+    <h2 id="ldTitle"></h2>
+    <div id="ldStars"></div>
+    <p id="ldText" class="lead"></p>
+    <button id="btnLdNext">下一课</button>
+    <button id="btnLdRetry" class="ghost">再练一次</button>
+    <button id="btnLdFree" class="ghost">接着自由开</button>
+    <button id="btnLdMenu" class="ghost">回课程表</button>
+  </div>
+</div>
+<div id="bigmap" class="hidden"><canvas id="bigCanvas"></canvas><div id="bigHint">拖动平移 · 滚轮缩放 · M / Esc 关闭</div></div>
 
 <div id="report" class="overlay hidden"><div class="card wide"><h2>驾驶复盘</h2><div id="reportBody"></div><button id="btnReportClose">关闭</button></div></div>
 <div id="book" class="overlay hidden"><div class="card wide"><h2>标志图鉴</h2><div id="bookBody"></div><button id="btnBookClose">关闭</button></div></div>

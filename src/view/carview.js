@@ -235,8 +235,8 @@ export function buildCarView(scene, renderer, navCanvas) {
     mirrors.push({ rt, cam, mesh });
   };
   addMirror(0.28, 0.095, V(1.92, 1.455, 0.0), -(Math.PI / 2 + 0.22), V(-1.0, 1.3, 0), Math.PI / 2, 13, 768, 260, false);
-  addMirror(0.2, 0.125, V(2.18, 1.04, -1.06), -1.22, V(2.2, 1.04, -1.08), Math.PI / 2 - 0.13, 17, 384, 240, true);
-  addMirror(0.2, 0.125, V(2.18, 1.04, 1.06), -2.09, V(2.2, 1.04, 1.08), Math.PI / 2 + 0.13, 17, 384, 240, true);
+  addMirror(0.23, 0.145, V(2.18, 1.085, -1.06), -1.22, V(2.2, 1.04, -1.08), Math.PI / 2 - 0.13, 17, 384, 240, true);
+  addMirror(0.23, 0.145, V(2.18, 1.085, 1.06), -2.09, V(2.2, 1.04, 1.08), Math.PI / 2 + 0.13, 17, 384, 240, true);
 
   const camera = new THREE.PerspectiveCamera(58, 16 / 9, 0.08, 1800);
   scene.add(camera);

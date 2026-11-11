@@ -31,6 +31,14 @@ export function makeAudio() {
   A.bad = () => { beep(330, 0.22, 0.09, 'triangle'); beep(247, 0.32, 0.09, 'triangle', 0.18); };
   A.minor = () => beep(392, 0.2, 0.07, 'triangle');
   A.good = () => { beep(660, 0.12, 0.06); beep(880, 0.2, 0.06, 'sine', 0.1); };
+  // 撞击：一声闷响（低频正弦快速下滑）+ 一小段噪声
+  A.crash = (hard) => {
+    if (!ctx) return; const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(hard ? 140 : 110, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.28); g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.45);
+    const n = ctx.createBufferSource(), buf = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate), d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = hard ? 2400 : 900; const g2 = ctx.createGain(); g2.gain.value = 0.28; n.buffer = buf; n.connect(f).connect(g2).connect(ctx.destination); n.start(t);
+  };
   A.horn = () => { beep(420, 0.45, 0.1, 'sawtooth'); beep(520, 0.45, 0.08, 'sawtooth'); };
   return A;
 }
