@@ -15,6 +15,7 @@ import { EVENT_TEXT, EVENT_SHORT, hintText, ALERT_TEXT, SIGN_BOOK, SHIFT_MSG } f
 import { makeAudio } from './view/audio.js';
 import { boardStart, boardEnd, boardTick, boardLeave, boardActive } from './board.js';
 import { LESSONS, lessonState } from './lessons.js';
+import { cloudOn, cloudInit, cloudSave } from './cloud.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -61,19 +62,46 @@ function buildStartList() {
     if (b.dataset.i === '-1') { b.textContent = '📍 ' + startAt.name; continue; }
     b.onclick = () => { if (b.dataset.i === 'map') return toggleBig(true); const p = PLACES[+b.dataset.i]; setStart({ name: p[0], lat: p[1], lon: p[2] }); };
   }
-  $('btnStart').textContent = ready ? `自由练习 · 从 ${startAt.name} 出发（Enter）` : '地图加载中…';
+  $('btnStart').textContent = !ready ? '地图加载中…' : !cloudOK ? (cloudErr || '读取云存档…') : `自由练习 · 从 ${startAt.name} 出发（Enter）`;
+  $('btnStart').disabled = !(ready && cloudOK);
 }
 function setStart(at) {
   startAt = at; try { localStorage.setItem('jdStartAt', JSON.stringify(at)); } catch { /* 同上 */ }
   if (ready) { startPose = poseFor(at); parkSpot = null; restart(); }
   buildStartList();
 }
-let lesson = null, stars = {};
-try { stars = JSON.parse(localStorage.getItem('jdLessons') || '{}'); } catch { /* 存不了就不记 */ }
+// 进度：课程星级 + 无违章最佳。站外存本地；平台里交给云存档（不碰本地这两项，免得不同账号、游客混在一起）
+let lesson = null, stars = {}, bestClean = 0;
+if (!cloudOn) {
+  try { stars = JSON.parse(localStorage.getItem('jdLessons') || '{}'); } catch { /* 存不了就不记 */ }
+  try { bestClean = +localStorage.getItem('jdBestClean') || 0; } catch { /* 同上 */ }
+}
+function saveProgress() {
+  if (cloudOn) return cloudSave();
+  try { localStorage.setItem('jdLessons', JSON.stringify(stars)); localStorage.setItem('jdBestClean', bestClean); } catch { /* 存不了就不记 */ }
+}
+let cloudOK = !cloudOn, cloudErr = '';
+cloudInit({
+  exportState: () => ({ lessons: { ...stars }, bestClean }),
+  importState: (d) => {   // 整份替换（玩家在平台上选了另一份存档时也会再调一次）
+    const s = {};
+    for (const [k, v] of Object.entries((d && d.lessons) || {})) if (/^\d+$/.test(k) && +k < LESSONS.length && v >= 1) s[k] = Math.min(3, Math.floor(v));
+    stars = s; bestClean = Math.max(0, Math.floor(+(d && d.bestClean) || 0));
+    buildLessonList();
+  },
+  summary: (d) => `过了 ${Object.values((d && d.lessons) || {}).filter(n => n > 0).length}/${LESSONS.length} 课 · 无违章最长 ${Math.floor(+(d && d.bestClean) || 0)} 米`,
+}).then(() => {
+  cloudOK = true; buildStartList();
+  if (ready && wantLesson >= 0) { const w = wantLesson; wantLesson = -1; startLesson(w); }
+}, (e) => {   // 存档格式不认识、会话无效等：不能当新玩家开局，免得覆盖进度
+  cloudErr = '云存档读取失败：' + (e && e.message || e) + '。刷新页面再试';
+  $('btnStart').textContent = cloudErr; buildLessonList();
+});
 
 function buildLessonList() {
   $('lessonList').innerHTML = LESSONS.map((l, i) => `<button class="ghost" data-i="${i}"><b>${i + 1}. ${l.title}</b><span>${wantLesson === i ? '加载中…' : '★'.repeat(stars[i] || 0)}</span></button>`).join('');
-  for (const b of $('lessonList').children) b.onclick = () => { if (!ready) { wantLesson = +b.dataset.i; buildLessonList(); return; } audio.unlock(); startLesson(+b.dataset.i); };
+  if (cloudErr) for (const b of $('lessonList').children) b.disabled = true;
+  for (const b of $('lessonList').children) b.onclick = () => { if (!ready || !cloudOK) { wantLesson = +b.dataset.i; buildLessonList(); return; } audio.unlock(); startLesson(+b.dataset.i); };
 }
 buildLessonList(); buildStartList();
 // 自己的车：车型 + 颜色，开始界面上选，存在本地
@@ -131,11 +159,10 @@ function poseFor(at) {
 let startPose = poseFor(startAt);
 function placeCar(p) { const far = ready && Math.hypot(p.x - S.car.x, p.z - S.car.z) > 250; Object.assign(S.car, { x: p.x, z: p.z, h: p.h, y: p.y || 0, v: 0, steer: 0 }); if (far) { world.jump(); world.updateLod(p.x, p.z); } clearTransient(S.R); S.R.needReset = null; }
 // 无违章里程：往前开一米记一米，扣分的违规清零。最长的一段存本地，平台里还会上排行榜
-let bestClean = 0; try { bestClean = +localStorage.getItem('jdBestClean') || 0; } catch { /* 存不了就不记 */ }
 function endClean() {
   const m = S.clean; S.clean = 0; if (!(m > 0)) return;
   boardEnd(m);
-  if (m > bestClean) { bestClean = Math.floor(m); try { localStorage.setItem('jdBestClean', bestClean); } catch { /* 同上 */ } }
+  if (m > bestClean) { bestClean = Math.floor(m); saveProgress(); }
   return m;
 }
 function cleanStep() {
@@ -319,7 +346,7 @@ function toggleMenu() {
   if (!$('report').classList.contains('hidden') || !$('book').classList.contains('hidden')) { show('report', false); show('book', false); show('pause', true); return; }
   const open = $('pause').classList.contains('hidden'); show('pause', open); setPaused(open);
 }
-function start() { show('start', false); show('hud', true); S.running = true; setPaused(false); audio.unlock(); }
+function start() { if (!cloudOK) return; show('start', false); show('hud', true); S.running = true; setPaused(false); audio.unlock(); }
 $('btnStart').onclick = start;
 $('btnResume').onclick = () => { show('pause', false); setPaused(false); };
 $('btnReset').onclick = () => { S.R.needReset = {}; show('pause', false); setPaused(false); };
@@ -448,7 +475,7 @@ sky.setSkyline(raw.origin);
 world.updateLod(S.car.x, S.car.z); view.update(S.car, 0, 0); sky.update(view.camera, S.car.x, S.car.z); post.render(scene, view.camera);
 // 场景里几千个物体绝大多数不动：关掉每次渲染前的全场景矩阵刷新，会动的（自己的车、镜头、太阳）各自手动刷新
 scene.updateMatrixWorld(true); scene.matrixWorldAutoUpdate = false;
-$('btnStart').disabled = false;
+$('btnStart').disabled = !cloudOK;
 if (params.has('autostart')) start();
 requestAnimationFrame(tick);
 
@@ -590,7 +617,7 @@ function lessonTick() {
   if (!st.done && !forbidHit && st.failed !== 'score') return;
   lesson.over = true; setPaused(true);
   const ok = st.done && !st.failed, n = !ok ? 0 : st.penalty === 0 ? 3 : st.penalty <= 10 ? 2 : 1;
-  if (ok) { stars[lesson.i] = Math.max(stars[lesson.i] || 0, n); try { localStorage.setItem('jdLessons', JSON.stringify(stars)); } catch { /* 同上 */ } }
+  if (ok) { stars[lesson.i] = Math.max(stars[lesson.i] || 0, n); saveProgress(); }
   $('ldTitle').textContent = ok ? `第 ${lesson.i + 1} 课 通过` : '这一课没过';
   $('ldStars').textContent = ok ? '★'.repeat(n) + '☆'.repeat(3 - n) : '';
   $('ldText').textContent = ok ? (st.penalty ? `过程中扣了 ${st.penalty} 分。扣分项在“复盘”里能看到，零扣分是三星。` : '全程零扣分。')
@@ -598,7 +625,7 @@ function lessonTick() {
   $('btnLdNext').style.display = ok && lesson.i < LESSONS.length - 1 ? '' : 'none';
   show('lessonDone', true); if (ok) audio.good(); else audio.bad();
 }
-ready = true; buildStartList(); if (wantLesson >= 0) { const w = wantLesson; wantLesson = -1; startLesson(w); }
+ready = true; buildStartList(); if (wantLesson >= 0 && cloudOK) { const w = wantLesson; wantLesson = -1; startLesson(w); }
 $('btnLdNext').onclick = () => startLesson(lesson.i + 1);
 $('btnLdRetry').onclick = () => startLesson(lesson.i);
 $('btnLdFree').onclick = () => { endLesson(); show('lessonDone', false); setPaused(false); };
