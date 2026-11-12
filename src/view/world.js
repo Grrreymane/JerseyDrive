@@ -64,7 +64,7 @@ export function buildWorld(map, scene) {
       return g;
     }
     const m = new THREE.Mesh(geo, mat); m.renderOrder = order; m.matrixAutoUpdate = false; m.frustumCulled = false; m.receiveShadow = true; m.castShadow = cast; world.group.add(m); return m; };
-  const DS = THREE.DoubleSide;
+  const DS = THREE.DoubleSide, GROUND_Y = 0.3;      // 匝道 / 高架离地不到这么高的部分，按地面路画
 
   // ---------- 地面（人行道 / 街区）：浅色方砖 ----------
   // 人行道：5 英尺见方的混凝土板。板与板之间只有很浅的色差和细缝，再加颗粒、几块水渍和一两条裂纹，避免大片整齐的格子
@@ -119,9 +119,16 @@ export function buildWorld(map, scene) {
   const texAsphalt = canvasTex(256, speckle('#666c78', 0.08, 5000));      // 偏蓝的灰
   const Groad = new ChunkGeo(), Gpark = new ChunkGeo();
   for (const s of map.segs) {
-    if (s.high) continue;      // 高架和匝道另外建（见“高架”一节）
-    const v = 0.93 + hash(s.id) * 0.12;
-    strip(Groad, s, s.trimA - 0.05, s.len - s.trimB + 0.05, -s.halfW, s.halfW, 0, [v, v, v], 1 / 5);
+    const v = 0.93 + hash(s.id) * 0.12, A = s.trimA - 0.05, B = s.len - s.trimB + 0.05;
+    if (!s.high) { strip(Groad, s, A, B, -s.halfW, s.halfW, 0, [v, v, v], 1 / 5); continue; }
+    // 高架和匝道另外建（见“高架”一节）；但它们贴着地面的那几段（坡道落地后、高速的地面段）按地面路画：
+    // 桥面层贴地时比人行道那层只高 3 厘米，会被盖住，只剩标线浮在人行道上
+    for (let u = A, u0 = -1; ; u += 1) {
+      const uu = Math.min(u, B), y = segY(s, uu), low = y <= GROUND_Y && y >= -0.02;
+      if (low && u0 < 0) u0 = uu;
+      if ((!low || uu >= B) && u0 >= 0) { if (uu - u0 > 0.5) strip(Groad, s, u0, uu, -s.halfW, s.halfW, 0, [v, v, v], 1 / 5); u0 = -1; }
+      if (uu >= B) break;
+    }
   }
   for (const j of map.juncs) {
     const p = j.poly; if (j.y > 0.3) continue;
@@ -233,7 +240,7 @@ export function buildWorld(map, scene) {
     const drawY = (y) => y >= 0 ? Math.max(y + LIFT, CH + 0.03) : y + LIFT + 0.13 * Math.max(0, 1 + y / 0.6);
     const fine = (seg, sA, sB) => {      // 比地面路切得密一点：坡道要跟着高度走
       const out = [], P = {}; const n = Math.max(1, Math.ceil((sB - sA) / 8));
-      for (let i = 0; i <= n; i++) { const u = sA + (sB - sA) * i / n; pointAt(seg, u, P); out.push({ x: P.x, z: P.z, rx: -P.dz, rz: P.dx, y: drawY(segY(seg, u)), u }); }
+      for (let i = 0; i <= n; i++) { const u = sA + (sB - sA) * i / n, y = segY(seg, u); pointAt(seg, u, P); out.push({ x: P.x, z: P.z, rx: -P.dz, rz: P.dx, y: drawY(y), yr: y, u }); }
       return out;
     };
     // 桥面单独分成几组网格，各用不同的深度偏移：并行的两幅路、匝道汇入的地方桥面是叠着的，同一高度的两层面不错开就会闪
@@ -245,7 +252,8 @@ export function buildWorld(map, scene) {
       const r = fine(s, Math.max(0, s.trimA - 0.3), Math.min(s.len, s.len - s.trimB + 0.3)), w = s.halfW;
       for (let i = 1; i < r.length; i++) {
         const a = r[i - 1], b = r[i], hi = Math.min(a.y, b.y);
-        band(GbD[s.id % 3], a, b, -w, w, 0, DECK);
+        const flat = Math.max(a.yr, b.yr) <= GROUND_Y && Math.min(a.yr, b.yr) >= -0.02;      // 贴地的这一小段已经按地面路画了
+        if (!flat) band(GbD[s.id % 3], a, b, -w, w, 0, DECK);
         if (hi > 0.5) for (const sg of [-1, 1]) {      // 护栏（新泽西护栏的截面：下宽上窄）+ 桥面侧面
           { const q = pt(a, sg * (w + 0.3)), l = map.locate(q[0], q[2], LB, a.y); if (l.seg && l.seg !== s && l.seg.high && l.d < l.seg.halfW - 0.2) continue; }      // 这一侧压在旁边另一幅桥面上（并行、汇入）：不立护栏，不然护栏横在路中间
           const n = [a.rx * sg, 0, a.rz * sg], ni = [-n[0], 0, -n[2]], o0 = sg * w, o1 = sg * (w + 0.18), o2 = sg * (w + 0.42), bh = Math.min(0.85, hi * 0.6), th = Math.min(TH, hi);
