@@ -69,7 +69,7 @@ function spawnCar(T, pl) {
 function spawnPed(T, pl) {
   const map = T.map;
   for (let tries = 0; tries < 10; tries++) {
-    const a0 = T.rnd() * 6.2832, r0 = 25 + T.rnd() * (PED_R - 25), seg = map.locate(pl.x + Math.cos(a0) * r0, pl.z + Math.sin(a0) * r0, Q).seg; if (!seg || seg.useLen < 30 || seg.speed > 36 || seg.high) continue;
+    const a0 = T.rnd() * 6.2832, r0 = 25 + T.rnd() * (PED_R - 25), seg = map.locate(pl.x + Math.cos(a0) * r0, pl.z + Math.sin(a0) * r0, Q).seg; if (!seg || seg.useLen < 30 || seg.speed > 36 || seg.high || /^(motorway|trunk)/.test(seg.cls)) continue;      // 高速、快速路和它们的匝道上没有行人（匝道默认限速 35，以前会混进来）
     const u = seg.trimA + 6 + T.rnd() * (seg.useLen - 12), side = T.rnd() < 0.5 ? 1 : -1;
     pointAt(seg, u, P); const d = Math.hypot(P.x - pl.x, P.z - pl.z); if (d > PED_R || d < 25) continue;
     const off = seg.halfW + 0.75 + T.rnd() * 0.35;

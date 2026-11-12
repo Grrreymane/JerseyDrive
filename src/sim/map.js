@@ -300,3 +300,35 @@ export function obbOverlap(ax, az, ah, al, aw, bx, bz, bh, bl, bw) {
   }
   return true;
 }
+
+/** 给路口进口标上“禁止红灯右转”（leg.ntor）。rows 见 data/ntor.json：按街名 + 行驶方向找，或者直接给经纬度 + 方向。返回没对上的行 */
+const STREET_ABBR = { avenue: 'ave', av: 'ave', street: 'st', place: 'pl', boulevard: 'blvd', saint: 'st', road: 'rd', highway: 'hwy', drive: 'dr', terrace: 'ter', court: 'ct' };
+const normStreet = (n) => (n || '').toLowerCase().replace(/[.']/g, '').split(/\s+/).filter(Boolean).map(w => STREET_ABBR[w] || w).join(' ');
+const COMPASS = { North: [0, -1], South: [0, 1], East: [1, 0], West: [-1, 0] };
+const baseStreet = (n) => normStreet(n).replace(/ (ave|st|pl|blvd|rd|dr|ter|ct)$/, '');
+export function markNoTurnOnRed(map, rows) {
+  const miss = [];
+  for (const r of rows) for (const norm of [normStreet, baseStreet]) {      // 先按全名对；对不上再只看名字本身（法规里写 Prospect Av，地图上是 Prospect Street）
+    let hit = 0;
+    const pick = (j, legs) => {
+      const v = COMPASS[r.dir]; if (!v) { for (const l of legs) { l.ntor = true; hit++; } return; }
+      let best = null, bd = 0.35; for (const l of legs) { const d = -l.ox * v[0] - l.oz * v[1]; if (d > bd) { bd = d; best = l; } }      // 进口的行驶方向 = -(ox, oz)
+      if (best) { best.ntor = true; hit++; }
+    };
+    if (r.at) {
+      const o = map.origin, x = (r.at[1] - o.lon) * o.kx, z = -(r.at[0] - o.lat) * o.kz;
+      let j = null, d = 40; for (const k of map.juncs) { const e = Math.hypot(k.cx - x, k.cz - z); if (e < d) { d = e; j = k; } }
+      if (j) pick(j, j.legs.filter(l => l.approach));
+    } else {
+      const S = norm(r.street), O = r.onto.split('/').map(norm);
+      for (const j of map.juncs) {
+        if (!j.legs.some(l => O.includes(norm(l.segRef.name)))) continue;
+        const on = j.legs.filter(l => l.approach && norm(l.segRef.name) === S); if (!on.length) continue;
+        if (r.dir === 'Both' || r.dir === 'All') { for (const l of (r.dir === 'All' ? j.legs.filter(l => l.approach) : on)) { l.ntor = true; hit++; } }
+        else pick(j, on);
+      }
+    }
+    if (hit) break; if (norm === baseStreet) miss.push(r);
+  }
+  return miss;
+}

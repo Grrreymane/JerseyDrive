@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { prepareMap, signalState, laneCenter, laneInfo, offsetPoint, pointAt, segY, turnType, CAR } from './sim/map.js';
+import { prepareMap, markNoTurnOnRed, signalState, laneCenter, laneInfo, offsetPoint, pointAt, segY, turnType, CAR } from './sim/map.js';
 import { makeCar, stepCar, setSignal, shift, carCenter, MPH, GEARS } from './sim/car.js';
 import { makeTraffic, stepTraffic } from './sim/traffic.js';
 import { buildActors } from './view/actors.js';
@@ -119,6 +119,8 @@ applyCar();
 await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));      // 先让浏览器把界面画出来，再开始加载（建场景那几秒主线程是占满的）
 const raw = await (await fetch(MAPS[region])).json();
 const map = prepareMap(raw);
+// 禁止红灯右转的路口（有出处的那些）：标到进口上，规则、标志、教练提示都看它
+try { const miss = markNoTurnOnRed(map, (await (await fetch('data/ntor.json')).json()).rows); if (miss.length) console.info('NTOR 没对上：', miss.map(r => r.street || r.at).join('；')); } catch { /* 文件缺了就当没有 */ }
 const world = buildWorld(map, scene);
 // 水面（浅蓝，透明底），大地图和小地图都用
 let waterImg = null;
@@ -312,7 +314,7 @@ function drawMini() {
   }
   if (route) {      // 导航路线：蓝色，画在路面上面
     mc.strokeStyle = '#3d8bff'; mc.lineWidth = 6; mc.beginPath();
-    for (const r of route.list) { const g = r.seg; if (Math.hypot(g.px[g.n >> 1] - car.x, g.pz[g.n >> 1] - car.z) > range + g.len) continue; mc.moveTo(g.px[0], g.pz[0]); for (let i = 1; i < g.n; i++) mc.lineTo(g.px[i], g.pz[i]); }
+    route.list.forEach((r, k) => { const g = r.seg; if (Math.hypot(g.px[g.n >> 1] - car.x, g.pz[g.n >> 1] - car.z) > range + g.len) return; routePath(k).forEach(([x, z], i) => i ? mc.lineTo(x, z) : mc.moveTo(x, z)); });
     mc.stroke(); mc.fillStyle = '#ff4b3e'; mc.beginPath(); mc.arc(route.dest.x, route.dest.z, 6, 0, 7); mc.fill();
   }
   for (const j of map.juncs) {
@@ -693,7 +695,7 @@ function drawBig() {
   }
   if (route) {
     c.strokeStyle = 'rgba(66,133,244,0.9)'; c.lineWidth = 6; c.beginPath();
-    for (const r of route.list) { const g = r.seg; c.moveTo(X(g.px[0]), Z(g.pz[0])); for (let i = 1; i < g.n; i++) c.lineTo(X(g.px[i]), Z(g.pz[i])); }
+    route.list.forEach((r, k) => routePath(k).forEach(([x, z], i) => i ? c.lineTo(X(x), Z(z)) : c.moveTo(X(x), Z(z))));
     c.stroke(); const dx = X(route.dest.x), dz = Z(route.dest.z);
     c.fillStyle = '#ea4335'; c.beginPath(); c.arc(dx, dz - 16, 9, 0, 7); c.fill(); c.beginPath(); c.moveTo(dx - 7, dz - 11); c.lineTo(dx + 7, dz - 11); c.lineTo(dx, dz); c.fill(); c.fillStyle = '#fff'; c.beginPath(); c.arc(dx, dz - 16, 3.5, 0, 7); c.fill();
   }
@@ -763,6 +765,15 @@ function setDest(x, z) {
   if (!r) { toast({ sev: 'info' }, '到不了那里', '从现在的位置按单行道规则开不过去，换个地方试试。', 3500); return; }
   route = r; routeT = performance.now(); show('btnNavClear', true); drawBig(); navTick();
 }
+/** 路线第 k 段要画的点：第一段从车现在的位置画起、最后一段画到目的地为止，走过的部分不画 */
+function routePath(k) {
+  const r = route.list[k], g = r.seg, out = [], P = {}; let s0 = 0, s1 = g.len;
+  if (k === 0 && route.curS != null) { if (r.fwd) s0 = route.curS; else s1 = route.curS; }
+  if (k === route.list.length - 1) { if (r.fwd) s1 = Math.min(s1, route.dest.s); else s0 = Math.max(s0, route.dest.s); }
+  if (s1 <= s0) return out;
+  pointAt(g, s0, P); out.push([P.x, P.z]); for (let i = 0; i < g.n; i++) if (g.cum[i] > s0 && g.cum[i] < s1) out.push([g.px[i], g.pz[i]]); pointAt(g, s1, P); out.push([P.x, P.z]);
+  return out;
+}
 function clearRoute() { route = null; show('navBox', false); show('btnNavClear', false); }
 const NAV_ARROW = { left: '↰', right: '↱', through: '↑', arrive: '⚑' }, NAV_WORD = { left: '左转', right: '右转' };
 function navTick() {
@@ -776,9 +787,11 @@ function navTick() {
     if (performance.now() - routeT > 1000) { routeT = performance.now(); const r = planRoute(route.dest); if (r) route = r; }
     return;
   }
+  if (i > 0) route.list.splice(0, i);      // 走过的路段从路线里去掉，蓝线只留前面的
+  route.curS = cur.s;
   let d = cur.fwd ? cur.seg.len - cur.seg.trimB - cur.s : cur.s - cur.seg.trimA, kind = 'arrive', into = '', total = d;
-  for (let k = i + 1; k < route.list.length; k++) total += route.list[k].seg.useLen;
-  for (let k = i; k < route.list.length - 1; k++) {
+  for (let k = 1; k < route.list.length; k++) total += route.list[k].seg.useLen;
+  for (let k = 0; k < route.list.length - 1; k++) {
     const a = route.list[k], b = route.list[k + 1], j = a.fwd ? a.seg.jb : a.seg.ja, la = map.legOf(j, a.seg, a.fwd ? 'b' : 'a'), lb = map.legOf(j, b.seg, b.fwd ? 'a' : 'b');
     const type = la && lb ? turnType(-la.ox, -la.oz, lb.ox, lb.oz) : 'through';
     if (type !== 'through' && j.control !== 'joint') { kind = type; into = b.seg.name; break; }

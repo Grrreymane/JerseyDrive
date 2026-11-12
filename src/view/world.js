@@ -357,6 +357,10 @@ export function buildWorld(map, scene) {
           ['R', 'Y', 'G'].forEach((kind, k) => lampAt.push({ x: x + l.ox * 0.16, y: y + 0.36 - k * 0.36, z: z + l.oz * 0.16, fx: l.ox, fz: l.oz, j, group: l.group, kind }));
         };
         head(hx, 5.35, hz); head(px + l.ox * 0.25 - rtx * 0.3, 3.3, pz + l.oz * 0.25 - rtz * 0.3);
+        if (l.ntor) {      // NO TURN ON RED：挂在横臂上灯头右边，杆子上再挂一块
+          const sx = hx + rtx * 1.0, sz = hz + rtz * 1.0; board(Gs, sx + l.ox * 0.05, 5.35, sz + l.oz * 0.05, l.ox, l.oz, 0.95, 0.95, atlas.uv('notor')); backing(sx, 5.35, sz, l.ox, l.oz, 0.66, 0.86);
+          board(Gs, px + l.ox * 0.2, 2.45, pz + l.oz * 0.2, l.ox, l.oz, 0.8, 0.8, atlas.uv('notor')); backing(px + l.ox * 0.15, 2.45, pz + l.oz * 0.15, l.ox, l.oz, 0.56, 0.72);
+        }
       }
       // 路面转向箭头
       const tl = l.end === 'b' ? seg.turnF : seg.turnB;

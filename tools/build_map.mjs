@@ -66,32 +66,109 @@ for (const w of ways) {
   if ((t.tunnel === 'yes' && !low) || (!high && !low && (t.bridge === 'yes' || (t.layer && t.layer !== '0')))) continue;
   if (t.access === 'private' || t.access === 'no') continue;
   const a = attrs(t);
+  // free：高速 / 快速路一家的路（含匝道），高度可以调（路堤、桥、下沉）；别的路钉在地面。layer：立交时谁在上面
+  const ex = { free: /^(motorway|trunk)/.test(t.highway), layer: parseInt(t.layer) || (high ? 1 : low ? -1 : 0) };
   let ids = w.nodes.slice();
   if (t.oneway === '-1') ids.reverse();
   let cur = [];
   for (const id of ids) {
     const n = nodes.get(id);
     if (n && inBounds(n.p)) cur.push(id);
-    else { if (cur.length > 1) runs.push({ a, ids: cur, high, low }); cur = []; }
+    else { if (cur.length > 1) runs.push({ a, ids: cur, high, low, ...ex }); cur = []; }
   }
-  if (cur.length > 1) runs.push({ a, ids: cur, high, low });
+  if (cur.length > 1) runs.push({ a, ids: cur, high, low, ...ex });
 }
-// 节点高度：只属于高架路的节点先定在桥面高度，和地面路共用的节点是 0；再沿路把坡度压到 5.5% 以内，匝道自然就成了斜坡
-const DECK = 7.5, GRADE = 0.055, H = new Map();
-const DEEP = -6.5;
-for (const r of runs) for (const id of r.ids) if (!H.has(id)) H.set(id, r.high ? DECK : r.low ? DEEP : 0);
-for (const r of runs) if (!r.high && !r.low) for (const id of r.ids) H.set(id, 0);
-// 隧道的坡度约束：|高度差| 不超过 距离 × 坡度（和高架同一个式子，对负的高度一样成立）
-for (let pass = 0; pass < 400; pass++) {
-  let ch = false;
-  for (const r of runs) for (let i = 1; i < r.ids.length; i++) {
-    const a = r.ids[i - 1], b = r.ids[i], d = dist(nodes.get(a).p, nodes.get(b).p) * GRADE;
-    const ha = H.get(a), hb = H.get(b);
-    if (ha > hb + d + 1e-6) { if (ha > 0) H.set(a, hb + d); else H.set(b, ha - d); ch = true; }
-    else if (hb > ha + d + 1e-6) { if (hb > 0) H.set(b, ha + d); else H.set(a, hb - d); ch = true; }
+// ---------- 节点高度 ----------
+// 高速一家的路（free：含匝道、路堤、桥、隧道）高度可调，别的路钉在地面 0。想要的高度：桥 DECK、隧道 DEEP、其余 0。
+// 约束：① 坡度不超过 GRADE；② 立交——平面上相交、附近没有共用节点的两条路，上面那条在交点处至少比下面高 CLEAR。
+// 做法：上限 Hi / 下限 Lo 都是“坡度包络”（从钉死的点和立交净空要求出发，每走 1 米放宽 GRADE）；
+//       高度 = 想要的高度夹在 [Lo, Hi] 里（冲突时保净空，坡就陡一点）；再把桥两头的路堤往外抬成坡道，不在桥里面降。
+//       下面那条路的高度会变，立交要求跟着变，所以整个过程做几轮。
+const DECK = 7.5, GRADE = 0.055, DEEP = -6.5, CLEAR = 5.2, H = new Map();
+// 高速的长直边（隧道里一条边能有几百米）中间补点，不然高度只能在两头取，钻不过中间的路
+{ let nid = -1; for (const r of runs) { if (!r.free) continue; const out = [r.ids[0]];
+  for (let i = 1; i < r.ids.length; i++) { const p = nodes.get(r.ids[i - 1]).p, q = nodes.get(r.ids[i]).p, n = Math.floor(dist(p, q) / 30);
+    for (let k = 1; k <= n; k++) { const t = k / (n + 1), id = nid--; nodes.set(id, { id, p: [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t], tags: {} }); out.push(id); }
+    out.push(r.ids[i]); }
+  r.ids = out; } }
+const fixed = new Set(); for (const r of runs) if (!r.free) for (const id of r.ids) fixed.add(id);
+const want = new Map();
+for (const r of runs) for (const id of r.ids) { if (fixed.has(id)) { want.set(id, 0); continue; } const v = r.high ? DECK : r.low ? DEEP : 0, o = want.get(id); if (o === undefined || Math.abs(v) > Math.abs(o)) want.set(id, v); }
+const edges = []; for (const r of runs) for (let i = 1; i < r.ids.length; i++) { const L = dist(nodes.get(r.ids[i - 1]).p, nodes.get(r.ids[i]).p); edges.push([r.ids[i - 1], r.ids[i], L * GRADE, r, L]); }
+// 立交：用格子找平面上相交的两条边
+const crossings = [];
+{
+  const CG = 40, grid = new Map(), ck = (i, j) => i * 100003 + j;
+  edges.forEach((e, k) => { const p = nodes.get(e[0]).p, q = nodes.get(e[1]).p; for (let i = Math.floor(Math.min(p[0], q[0]) / CG); i <= Math.floor(Math.max(p[0], q[0]) / CG); i++) for (let j = Math.floor(Math.min(p[1], q[1]) / CG); j <= Math.floor(Math.max(p[1], q[1]) / CG); j++) { const key = ck(i, j); if (!grid.has(key)) grid.set(key, []); grid.get(key).push(k); } });
+  const idSet = new Map(), seen = new Set();
+  const sharedNear = (A, B, x, z) => { if (!idSet.has(A)) idSet.set(A, new Set(A.ids)); const S = idSet.get(A); for (const id of B.ids) if (S.has(id)) { const p = nodes.get(id).p; if (Math.hypot(p[0] - x, p[1] - z) < 40) return true; } return false; };
+  for (const list of grid.values()) for (let u = 0; u < list.length; u++) for (let v = u + 1; v < list.length; v++) {
+    const E = edges[list[u]], F = edges[list[v]], A = E[3], B = F[3]; if (A === B || (!A.free && !B.free)) continue;
+    const key = Math.min(list[u], list[v]) * 1e7 + Math.max(list[u], list[v]); if (seen.has(key)) continue; seen.add(key);
+    if (E[0] === F[0] || E[0] === F[1] || E[1] === F[0] || E[1] === F[1]) continue;
+    const p = nodes.get(E[0]).p, q = nodes.get(E[1]).p, r = nodes.get(F[0]).p, s = nodes.get(F[1]).p;
+    const dx = q[0] - p[0], dz = q[1] - p[1], ex = s[0] - r[0], ez = s[1] - r[1], den = dx * ez - dz * ex; if (Math.abs(den) < 1e-9) continue;
+    const t = ((r[0] - p[0]) * ez - (r[1] - p[1]) * ex) / den, w = ((r[0] - p[0]) * dz - (r[1] - p[1]) * dx) / den; if (t < 0 || t > 1 || w < 0 || w > 1) continue;
+    const x = p[0] + dx * t, z = p[1] + dz * t; if (sharedNear(A, B, x, z)) continue;     // 汇入 / 分出的地方两条路画得交叉一点，不算立交
+    crossings.push({ E, F, t, w });
   }
-  if (!ch) break;
 }
+const hAt = (e, t) => H.get(e[0]) + (H.get(e[1]) - H.get(e[0])) * t;
+// 高速和地面路在平面上交叉、OSM 又没标谁上谁下：沿着高速找最近（250 米内）的桥或隧道，跟着它走（NJ 139 下层旁边是隧道，就从路底下钻过去）
+const adj = new Map(); for (const e of edges) if (e[3].free) for (const [x, y] of [[e[0], e[1]], [e[1], e[0]]]) { if (!adj.has(x)) adj.set(x, []); adj.get(x).push([y, e[4]]); }
+const goesUp = (e) => {
+  const best = new Map([[e[0], 0], [e[1], 0]]), q = [e[0], e[1]]; let hit = null, hd = 1e9;
+  while (q.length) { const x = q.shift(), d0 = best.get(x); const w = want.get(x) || 0; if (w !== 0 && d0 < hd) { hd = d0; hit = w; } for (const [y, d] of adj.get(x) || []) { const nd = d0 + d; if (nd < 250 && nd < (best.get(y) ?? 1e9)) { best.set(y, nd); q.push(y); } } }
+  return hit === null || hit > 0;
+};
+const envelope = (seed, up) => {      // up：上限包络（往外走变大）；否则下限包络（往外走变小）
+  const m = new Map(seed);
+  for (let pass = 0; pass < 2000; pass++) {
+    let ch = false;
+    for (const [a, b, d] of edges) {
+      const ha = m.get(a), hb = m.get(b); if (ha === undefined && hb === undefined) continue;
+      if (up) { if (ha !== undefined && !fixed.has(b) && (hb === undefined || hb > ha + d + 1e-6)) { m.set(b, ha + d); ch = true; } else if (hb !== undefined && !fixed.has(a) && (ha === undefined || ha > hb + d + 1e-6)) { m.set(a, hb + d); ch = true; } }
+      else { if (ha !== undefined && !fixed.has(b) && (hb === undefined || hb < ha - d - 1e-6)) { m.set(b, ha - d); ch = true; } else if (hb !== undefined && !fixed.has(a) && (ha === undefined || ha < hb - d - 1e-6)) { m.set(a, hb - d); ch = true; } }      // 钉在地面的点不被推动
+    }
+    if (!ch) break;
+  }
+  return m;
+};
+for (const [id, v] of want) H.set(id, v);
+let nConflict = 0;
+for (let round = 0; round < 9; round++) {
+  const loS = new Map(), hiS = new Map();
+  for (const id of fixed) { loS.set(id, 0); hiS.set(id, 0); }
+  for (const c of crossings) {
+    const A = c.E[3], B = c.F[3], ha = hAt(c.E, c.t), hb = hAt(c.F, c.w);
+    // 谁在上面：层号大的；一样就看谁能调（能调的上去）、谁是桥、现在谁高
+    if (c.up === undefined || (c.flip && !c.flipped)) {
+      c.up = A.layer !== B.layer ? A.layer > B.layer : A.free !== B.free ? (A.free ? goesUp(c.E) : !goesUp(c.F)) : A.high !== B.high ? A.high : goesUp(c.E) !== goesUp(c.F) ? goesUp(c.E) : ha >= hb;
+      if (c.flip) { c.up = !c.up; c.flipped = true; }      // 上一轮这么摆坡度满足不了：换过来（从底下钻过去 / 让另一条在上面）
+    }
+    const [U, Ut, L, Lt] = c.up ? [c.E, ha, c.F, hb] : [c.F, hb, c.E, ha]; c.U = U; c.L = L;
+    if (U[3].free) for (const id of [U[0], U[1]]) loS.set(id, Math.max(loS.get(id) ?? -1e9, Lt + CLEAR));
+    else for (const id of [L[0], L[1]]) hiS.set(id, Math.min(hiS.get(id) ?? 1e9, Ut - CLEAR));
+  }
+  const Lo = envelope(loS, false), Hi = envelope(hiS, true);
+  nConflict = 0;
+  const bad = new Set();
+  for (const [id, v] of want) { if (fixed.has(id)) { H.set(id, 0); continue; } const lo = Lo.get(id) ?? -1e9, hi = Hi.get(id) ?? 1e9; if (lo > hi + 0.01) { nConflict++; bad.add(id); } H.set(id, lo > hi ? lo : Math.min(hi, Math.max(lo, v))); }
+  for (const c of crossings) if (!c.flipped && c.E[3].layer === c.F[3].layer && [c.U[0], c.U[1], c.L[0], c.L[1]].some(id => bad.has(id))) c.flip = true;
+  // 还是冲突（地形没做：NJ 139 下层从悬崖底下钻出来马上接高架）：这一带的坡放陡一点，最多 18%，净空优先
+  if (round >= 2) for (const e of edges) if (bad.has(e[0]) || bad.has(e[1])) e[2] = e[4] * Math.min(0.18, e[2] / e[4] * 1.5);
+  // 桥面和旁边的路堤：低的一头抬起来（高架往外接坡道）；隧道同理，高的一头压下去。上下限是坡度包络，抬 / 压都不会越界
+  for (let pass = 0; pass < 2000; pass++) {
+    let ch = false;
+    for (const [a, b, d] of edges) {
+      const ha = H.get(a), hb = H.get(b);
+      if (ha > hb + d + 1e-6) { if (ha > 0 && !fixed.has(b)) { H.set(b, ha - d); ch = true; } else if (ha <= 0 && !fixed.has(a)) { H.set(a, hb + d); ch = true; } }
+      else if (hb > ha + d + 1e-6) { if (hb > 0 && !fixed.has(a)) { H.set(a, hb - d); ch = true; } else if (hb <= 0 && !fixed.has(b)) { H.set(b, ha + d); ch = true; } }
+    }
+    if (!ch) break;
+  }
+}
+{ let bad = 0; for (const c of crossings) if (Math.abs(hAt(c.E, c.t) - hAt(c.F, c.w)) < CLEAR - 0.3) { bad++; if (process.env.HDBG) { const p = nodes.get(c.E[0]).p; console.log('  ', Math.round(p[0]), Math.round(p[1]), c.E[3].a.name, c.E[3].layer, c.E[3].free, hAt(c.E, c.t).toFixed(1), '|', c.F[3].a.name, c.F[3].layer, c.F[3].free, hAt(c.F, c.w).toFixed(1), 'up=' + c.up, c.flipped ? 'flipped' : ''); } } console.log(`heights: ${crossings.length} 处立交，净空不够 ${bad}，坡度冲突的节点 ${nConflict}`); }
 const use = new Map();
 for (const r of runs) r.ids.forEach((id, i) => use.set(id, (use.get(id) || 0) + ((i === 0 || i === r.ids.length - 1) ? 1 : 2)));
 // 端点记 1、中间点记 2：总数 > 2 的节点是真正要切的地方；等于 2 且不是同一条路的中间点时是两条路首尾相接

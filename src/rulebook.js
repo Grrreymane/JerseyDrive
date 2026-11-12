@@ -2,7 +2,9 @@
 
 /** 事件 → { title, body }。body 是“为什么错 + 正确做法” */
 export const EVENT_TEXT = {
-  red_light: (e) => e.afterStop
+  red_light: (e) => e.afterStop && e.ntor && e.turn === 'right'
+    ? { title: '这个路口禁止红灯右转', body: '路口挂着 NO TURN ON RED（红灯禁止转弯）的牌子：红灯时右转也不行，要等绿灯。新泽西默认允许红灯右转，但有这块牌子就不行。进路口前看一眼红绿灯旁边和右前方的白底黑字牌子。' }
+    : e.afterStop
     ? { title: '红灯时不能' + (e.turn === 'left' ? '左转' : '直行'), body: '红灯下唯一允许的动作是右转：先在停止线前完全停住，确认没有车和行人再转。新泽西不允许红灯左转。' }
     : { title: '闯红灯', body: '红灯必须在白色停止线前完全停住，等绿灯再走。想右转也要先停稳，不能直接拐过去。' },
   stop_sign: () => ({ title: '没有在 STOP 前停车', body: 'STOP 标志前必须完全停住（速度归零），停在白色停止线前；没有停止线就停在人行横道前。左、右、再左看一遍，确认安全再走。' }),
@@ -56,7 +58,8 @@ export function hintText(h) {
     case 'signal':
       if (h.state === 'G') return { icon: 'G', text: '绿灯：可以通过', sub: '左转要让对向直行的车和过马路的行人；右转让行人' };
       if (h.state === 'Y') return { icon: 'Y', text: '黄灯：能安全停下就停', sub: '已经压到停止线或停不住时才继续通过，不要加速抢灯' };
-      return { icon: 'R', text: near ? '红灯：车头停在白色停止线前' : '前方红灯：松油门，准备停车', sub: '要右转：停稳、确认没车没人后可以转。左转和直行必须等绿灯' };
+      if (h.ntor) return { icon: 'R', text: near ? '红灯：停在停止线前。这个路口红灯不能右转' : '前方红灯：松油门，准备停车', sub: '灯旁边挂着 NO TURN ON RED（红灯禁止转弯）：右转也要等绿灯' };
+      return { icon: 'R', text: near ? '红灯：车头停在白色停止线前' : '前方红灯：松油门，准备停车', sub: '没有 NO TURN ON RED 牌子，可以红灯右转：先停稳，让左边来的车和斑马线上的人，再转。左转和直行等绿灯' };
     case 'priority': return { icon: 'info', text: '这个路口你不用停，横向的车有 STOP', sub: '仍然松油门看一眼，对方不一定会让' };
   }
   return null;
@@ -72,7 +75,7 @@ export const SIGN_BOOK = [
   { id: 'wrongway', en: 'WRONG WAY', zh: '方向错了', tip: '你已经在逆行。马上靠边停下，安全地掉头。' },
   { id: 'oneway_r', en: 'ONE WAY', zh: '单行道', tip: '横着的这条路只能按箭头方向开。箭头朝右，你就只能右转进去。' },
   { id: 'speed25', en: 'SPEED LIMIT', zh: '限速（英里/小时）', tip: '最高车速。新泽西居民区、商业区默认 25 mph，学校区域 25 mph。' },
-  { id: 'notor', en: 'NO TURN ON RED', zh: '红灯禁止转弯', tip: '有这块牌子的路口，红灯时不能右转，必须等绿灯。' },
+  { id: 'notor', en: 'NO TURN ON RED', zh: '红灯禁止转弯', tip: '新泽西默认允许红灯右转（先停稳、让行），挂了这块牌子的路口不行，要等绿灯。牌子一般挂在红绿灯旁边。游戏里只标了查得到出处的路口（Heights 一带、Monticello Ave 等）。' },
   { id: 'noleft', en: 'NO LEFT TURN', zh: '禁止左转', tip: '红圈加斜杠 = 禁止。新泽西很多大路不让直接左转，要走右边的 jughandle 匝道绕过去。' },
   { id: 'noright', en: 'NO RIGHT TURN', zh: '禁止右转', tip: '这个路口不能右转。' },
   { id: 'nouturn', en: 'NO U-TURN', zh: '禁止掉头', tip: '这里不能掉头。' },

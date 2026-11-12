@@ -1,0 +1,31 @@
+{
+  "note": "禁止红灯右转（NO TURN ON RED）的路口进口。street 上朝 dir 方向开、到 onto 路口时红灯不能右转；dir 为 All 表示这个路口所有进口。只收有出处的：泽西城有 190 多处，市政法规（§332-8）的全表网站不让程序读，这里只有能查到的。",
+  "rows": [
+    { "street": "Summit Av", "dir": "South", "onto": "Carlton Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Carlton Av", "dir": "East", "onto": "Summit Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Central Av", "dir": "South", "onto": "Beacon Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Beacon Av", "dir": "West", "onto": "Central Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Prospect Av", "dir": "West", "onto": "Central Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Central Av", "dir": "South", "onto": "Manhattan Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Manhattan Av", "dir": "East", "onto": "Central Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Central Av", "dir": "North", "onto": "Franklin Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Franklin Av", "dir": "West", "onto": "Central Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "North St", "dir": "East", "onto": "Central Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Liberty Av", "dir": "Both", "onto": "Manhattan Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Palisade Av", "dir": "Both", "onto": "St. Pauls Av", "src": "JC Ord. 24-013 (2024-03)：Christ Hospital Garage / St. Pauls Av" },
+    { "street": "Palisade Av", "dir": "South", "onto": "Ravine Av/Wood Pl", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Ravine Av", "dir": "East", "onto": "Palisade Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Wood Pl", "dir": "West", "onto": "Palisade Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Griffith St", "dir": "East", "onto": "Palisade Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Palisade Av", "dir": "South", "onto": "Bowers St", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Bowers St", "dir": "West", "onto": "Palisade Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Webster Av", "dir": "North", "onto": "Franklin St", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Franklin St", "dir": "West", "onto": "Webster Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Beacon Av", "dir": "West", "onto": "Oakland Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Oakland Av", "dir": "South", "onto": "Beacon Av", "src": "JC Ord. 24-013 (2024-03)" },
+    { "street": "Monticello Av", "dir": "All", "onto": "Fairview Av", "src": "JC Monticello Ave 安全改造（2025）；没写哪个方向，按整个路口算" },
+    { "street": "Monticello Av", "dir": "All", "onto": "Jewett Av", "src": "JC Monticello Ave 安全改造（2025）；没写哪个方向，按整个路口算" },
+    { "street": "Monticello Av", "dir": "All", "onto": "Belmont Av", "src": "JC Monticello Ave 安全改造（2025）；没写哪个方向，按整个路口算" },
+    { "at": [40.7477174, -74.1675462], "dir": "East", "src": "OSM relation 945394（Newark，匝道进 McCarter Hwy）" }
+  ]
+}

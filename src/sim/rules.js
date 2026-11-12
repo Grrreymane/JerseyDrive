@@ -102,7 +102,7 @@ export function stepRules(R, car, map, t, dt, T = null) {
       if (de < 16) A.minV = Math.min(A.minV, sp);
       if (sp < 0.12 && dl < 11 && de > -0.5) { if (!A.stopped) A.stopT = t; A.stopped = true; if (dl < -0.8) A.overLine = true; }
       if (de < 80) R.hint = j.control === 'signal'
-        ? { kind: 'signal', state: signalState(j, A.leg.group, t), d: dl }
+        ? { kind: 'signal', state: signalState(j, A.leg.group, t), d: dl, ntor: !!A.leg.ntor }
         : { kind: j.control === 'allway' ? 'allway' : 'stop', d: dl, stopped: A.stopped, inferred: j.inferred };
     } else if (A.leg && A.leg.approach && j.control === 'stop' && de < 60) R.hint = { kind: 'priority', d: de };
     if (A.exits && A.leg.approach && de < 110) R.preview = { j, exits: A.exits, de };
@@ -177,8 +177,8 @@ function finishJunction(R, E, seg, car, t) {
   if (!out || out === E.leg) return;                         // 掉头或倒了回去：不评
   const type = turnType(-E.leg.ox, -E.leg.oz, out.ox, out.oz), name = E.j.name;
   if (E.state === 'R' && E.stopped && !E.redDone) {
-    if (type === 'right') emit(R, 'good_ror', car, t, name);
-    else { emit(R, 'red_light', car, t, name, { afterStop: true, turn: type }); E.viol = true; }
+    if (type === 'right' && !E.leg.ntor) emit(R, 'good_ror', car, t, name);
+    else { emit(R, 'red_light', car, t, name, { afterStop: true, turn: type, ntor: !!E.leg.ntor }); E.viol = true; }      // 挂了 NO TURN ON RED 的进口，红灯右转也算闯红灯
   }
   if (E.th) {      // 绿灯左转要让对向直行；红灯右转要让横向来车
     if (type === 'left' && E.state !== 'R' && E.th.oncoming) { emit(R, 'no_yield', car, t, name, { why: 'oncoming' }); E.viol = true; }
