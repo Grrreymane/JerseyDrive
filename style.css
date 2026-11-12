@@ -91,3 +91,8 @@ button.ghost { background: rgba(255, 255, 255, 0.07); color: var(--text); font-w
 #bigRes button { display: block; width: 100%; text-align: left; background: #fff; color: #202124; border: 0; border-radius: 0; padding: 9px 16px; font-size: 14px; font-weight: 500; margin: 0; } #bigRes button:hover { background: #eef3fd; } #bigRes small { color: #70757a; margin-left: 8px; } #bigRes i { display: block; padding: 9px 16px; color: #70757a; font-size: 13px; font-style: normal; }
 #bigPick { position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; background: #fff; color: #202124; border-radius: 16px; padding: 10px 12px 10px 18px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3); cursor: default; white-space: nowrap; } #bigPick.hidden { display: none; }
 #bigPick button { margin: 0; padding: 8px 14px; font-size: 14px; } #btnPickStart { background: #188038; color: #fff; }
+/* 选车 */
+#carPick { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 4px 0 14px; }
+#carTypes { display: flex; gap: 6px; flex-wrap: wrap; } #carTypes button { padding: 6px 11px; font-size: 13px; }
+#carColors { display: flex; gap: 6px; } #carColors button { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25); margin: 0; }
+#carColors button.on { border-color: #fff; box-shadow: 0 0 0 2px #4285f4; }

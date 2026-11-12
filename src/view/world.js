@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { LANE_W, XWALK_NEAR, XWALK_FAR, STOP_LINE, pointAt, offsetPoint, segY, signalState, hash } from '../sim/map.js';
 import { makeSignAtlas, makeNameAtlas } from './signs.js';
 import { Geo, ChunkGeo, lin } from './geo.js';
-import { carModel, carModelLow, treeModel, treePit, TREE_KINDS, lampPost, hydrant } from './models.js';
+import { carModel, carModelLow, CAR_TYPES, pickCarType, treeModel, treePit, TREE_KINDS, lampPost, hydrant } from './models.js';
 import { toonMat } from './toon.js';
 import { buildBuildings } from './buildings.js';
 import { buildLandmarks } from './landmarks.js';
@@ -162,8 +162,10 @@ export function buildWorld(map, scene) {
   add(Gy.build(), toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -10);
 
   // ---------- 路缘石：立面略带斜度 + 倒角 + 顶面 ----------
-  const Gc = new ChunkGeo(), Gtac = new ChunkGeo(), CURB = lin('#d9d6cf'), CURB_D = lin('#c2bfb8');
+  let nCurbSkip = 0; const Gc = new ChunkGeo(), Gtac = new ChunkGeo(), CURB = lin('#d9d6cf'), CURB_D = lin('#c2bfb8');
   const curbRun = (ax, az, bx, bz, nx, nz) => {    // n 指向人行道一侧
+    // 这段路缘外侧其实是另一条路的路面（两条路挨着、交叠、斜着汇入）：不画，不然一道路缘横在路中间
+    const mx = (ax + bx) / 2 + nx * 0.7, mz = (az + bz) / 2 + nz * 0.7; if (map.onRoad(mx, mz, 0, 0)) { nCurbSkip++; return; }
     const P = (x, z, d, y) => [x + nx * d, y, z + nz * d], f = [-nx * 0.98, 0.2, -nz * 0.98], c = [-nx * 0.64, 0.77, -nz * 0.64], u = [0, 1, 0];
     Gc.quadN([P(ax, az, 0, 0), P(bx, bz, 0, 0), P(bx, bz, 0.022, CH - 0.04), P(ax, az, 0.022, CH - 0.04)], [f, f, f, f], CURB_D);
     Gc.quadN([P(ax, az, 0.022, CH - 0.04), P(bx, bz, 0.022, CH - 0.04), P(bx, bz, 0.07, CH), P(ax, az, 0.07, CH)], [c, c, c, c], CURB);
@@ -432,12 +434,12 @@ export function buildWorld(map, scene) {
   {
     const cols = CAR_COLORS.map(c => new THREE.Color(c));
     const paint = toonMat({ vertexColors: true, spec: 1, rim: 0.5, smooth: true, paint: true, glass: 0.5 });
-    const gSedan = carModel('sedan'), gSuv = carModel('suv'), gLow = carModelLow(), R = world.group;
+    const gHi = Object.fromEntries(Object.keys(CAR_TYPES).map(t => [t, carModel(t)])), gLow = carModelLow(), R = world.group;
     const put = (m, p, i) => { Q.setFromAxisAngle(UP, -p.h); M.compose(V.set(p.x, 0, p.z), Q, S1.set(p.L / 4.55, 1, 1)); m.setMatrixAt(i, M); m.setColorAt(i, cols[Math.floor(hash(Math.round(p.x * 3) * 31 + Math.round(p.z * 3)) * cols.length)]); };
-    const isSuv = (p) => hash(Math.round(p.x * 5) + Math.round(p.z * 5) * 17) < 0.36;
+    const typeOf = (p) => pickCarType(hash(Math.round(p.x * 5) + Math.round(p.z * 5) * 17));
     for (const list of cellsOf(map.parked)) {
-      const sed = list.filter(p => !isSuv(p)), suv = list.filter(isSuv), hi = [];
-      if (sed.length) hi.push(inst(sed, gSedan, paint, put, R)); if (suv.length) hi.push(inst(suv, gSuv, paint, put, R));
+      const by = {}, hi = []; for (const p of list) (by[typeOf(p)] ||= []).push(p);
+      for (const [t, l] of Object.entries(by)) hi.push(inst(l, gHi[t], paint, put, R));
       addLod(list, hi, [inst(list, gLow, paint, put, R)], 120, 620);
     }
     S1.set(1, 1, 1);

@@ -227,8 +227,18 @@ export function prepareMap(raw) {
   const L0 = {};
   map.onRoad = (x, z, margin = 0, y) => {
     if (map.junctionAt(x, z, y)) return true;
-    const l = map.locate(x, z, L0, y); if (!l.seg) return false;
-    return Math.abs(l.o) <= l.seg.halfW + margin && l.s >= l.seg.trimA - 0.5 && l.s <= l.seg.len - l.seg.trimB + 0.5 && l.d <= l.seg.halfW + margin;
+    // 落在任何一条路的路面范围里都算（不只看最近的那条）：两条路挨得很近时（立交、斜着汇入、分隔的双向路），
+    // 最近的中心线常常是另一条路的，只看它会把明明在路面上的车判成开出路面
+    const list = segGrid.get(key(Math.floor(x / CELL), Math.floor(z / CELL))); if (!list) return false;
+    for (const [s, i] of list) {
+      const ax = s.px[i - 1], az = s.pz[i - 1], ex = s.px[i] - ax, ez = s.pz[i] - az, L2 = ex * ex + ez * ez || 1;
+      let t = ((x - ax) * ex + (z - az) * ez) / L2; t = t < 0 ? 0 : t > 1 ? 1 : t;
+      if (Math.hypot(x - ax - ex * t, z - az - ez * t) > s.halfW + margin) continue;
+      if (y !== undefined && s.ys && Math.abs(s.ys[i - 1] + (s.ys[i] - s.ys[i - 1]) * t - y) > 3) continue;
+      if (y !== undefined && !s.ys && Math.abs(y) > 3) continue;
+      const u = s.cum[i - 1] + Math.sqrt(L2) * t; if (u >= s.trimA - 0.5 && u <= s.len - s.trimB + 0.5) return true;
+    }
+    return false;
   };
   map.legOf = (j, seg, end) => j ? j.legs.find(l => l.segRef === seg && l.end === end) : null;
 

@@ -7,6 +7,8 @@ import { Geo, lin } from './geo.js';
 import { toonMat } from './toon.js';
 
 const UP = [0, 1, 0];
+/** 这些楼由这里单独做，建筑生成器跳过它们 */
+export const REPLACED = /^Journal Squared [123]$/;
 const canvasTex = (w, h, draw) => { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; draw(cv.getContext('2d'), w, h); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t; };
 
 export function buildLandmarks(map, parent, occupy) {
@@ -164,6 +166,92 @@ export function buildLandmarks(map, parent, occupy) {
         if (k % 2) { bar(a.Lb, b.Lt); bar(a.Rb, b.Rt); bar(a.Lt, b.Rt, 0.18); } else { bar(a.Lt, b.Lb); bar(a.Rt, b.Rb); bar(a.Rt, b.Lt, 0.18); }
       });
       if (G.i.length) finish(cx, cz, half + 760, G);
+    }
+  }
+
+  // ---------- Journal Square：Journal Squared 三栋塔楼、交通中心（One PATH Plaza）、下到 PATH 站的楼梯口 ----------
+  {
+    const find = (re) => { const out = []; map.raw.buildings.forEach((b, bi) => { if (re.test(b.n || '') && map.buildings[bi] && !map.buildings[bi].skip) out.push({ b, bi }); }); return out; };
+    const towers = find(REPLACED);
+    // 玻璃幕墙贴图：一格 = 8 个柱距 × 6 层。浅灰蓝的玻璃、每层一道楼板线，白色竖条一段一段错开（这三栋楼最认得出的地方）
+    const curtain = (seed) => canvasTex(512, 384, (c, W, H) => {
+      let r = seed; const rnd = () => { r = (r * 16807) % 2147483647; return r / 2147483647; };
+      const bw = W / 8, fh = H / 6;
+      for (let f = 0; f < 6; f++) for (let k = 0; k < 8; k++) { const g = c.createLinearGradient(0, f * fh, 0, (f + 1) * fh); const v = rnd() * 14; g.addColorStop(0, `rgb(${178 + v},${200 + v},${214 + v})`); g.addColorStop(1, `rgb(${120 + v},${146 + v},${168 + v})`); c.fillStyle = g; c.fillRect(k * bw, f * fh, bw, fh); }
+      c.fillStyle = 'rgba(255,255,255,0.22)'; c.beginPath(); c.moveTo(W * 0.1, H); c.lineTo(W * 0.55, 0); c.lineTo(W * 0.68, 0); c.lineTo(W * 0.23, H); c.fill();
+      c.fillStyle = '#7d8c99'; for (let f = 0; f <= 6; f++) c.fillRect(0, f * fh - 3, W, 6);                 // 楼板线
+      c.fillStyle = '#9aa8b3'; for (let k = 0; k <= 8; k++) c.fillRect(k * bw - 1.5, 0, 3, H);              // 竖框
+      c.fillStyle = '#f4f5f2'; for (let k = 0; k < 8; k++) { if (rnd() < 0.45) continue; const a = Math.floor(rnd() * 6), n = 2 + Math.floor(rnd() * 4); for (let f = a; f < a + n; f++) c.fillRect(k * bw - bw * 0.14, (f % 6) * fh, bw * 0.28, fh); }      // 白色竖条
+    });
+    const texs = [curtain(11), curtain(29), curtain(47)].map(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; return t; });
+    const TW = 8 * 2.1, TH = 6 * 3.05;
+    for (const [n, { b }] of towers.entries()) {
+      const P = []; for (let i = 0; i < b.pts.length; i += 2) P.push([b.pts[i], b.pts[i + 1]]);
+      let A = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; A += p[0] * q[1] - q[0] * p[1]; } if (A > 0) P.reverse();
+      let cx = 0, cz = 0; for (const p of P) { cx += p[0] / P.length; cz += p[1] / P.length; }
+      const G = new Geo(), F = new Geo(), H = b.h, crown = H - 9, WHITE = [1, 1, 1], CAP = lin('#eef0ee'), ROOFC = lin('#9aa0a6');
+      // 塔身：贴幕墙；顶上 9 米的“冠”往里收 0.6 米，白色的边框
+      const wall = (Gx, Q, y0, y1, uv) => { let u = 0; for (let i = 0; i < Q.length; i++) { const a = Q[i], c = Q[(i + 1) % Q.length], L = Math.hypot(c[0] - a[0], c[1] - a[1]); if (L < 0.05) continue; const nx = (c[1] - a[1]) / L, nz = -(c[0] - a[0]) / L, N = [nx, 0, nz]; Gx.quadN([[a[0], y0, a[1]], [c[0], y0, c[1]], [c[0], y1, c[1]], [a[0], y1, a[1]]], [N, N, N, N], WHITE, uv ? [[u / TW, y0 / TH], [(u + L) / TW, y0 / TH], [(u + L) / TW, y1 / TH], [u / TW, y1 / TH]] : undefined); u += L; } };
+      const inset = (d) => P.map(p => { const dx = cx - p[0], dz = cz - p[1], l = Math.hypot(dx, dz) || 1; return [p[0] + dx / l * d, p[1] + dz / l * d]; });
+      wall(F, P, 0, crown, true); wall(F, inset(0.6), crown + 0.6, H, true);
+      wall(G, inset(-0.05), crown, crown + 0.6); const cap = inset(-0.25); wall(G, cap, H, H + 1.4);      // 冠下的白色腰带、女儿墙
+      const tri = (Q, y, col) => { for (const t of THREE.ShapeUtils.triangulateShape(Q.map(p => new THREE.Vector2(p[0], p[1])), [])) G.flat(Q[t[0]][0], Q[t[0]][1], Q[t[1]][0], Q[t[1]][1], Q[t[2]][0], Q[t[2]][1], Q[t[2]][0], Q[t[2]][1], y, col); };
+      tri(P, crown + 0.6, CAP); tri(cap, H + 1.4, ROOFC);
+      G.box(cx, H + 3, cz, 9, 3.2, 7, Math.atan2(P[1][1] - P[0][1], P[1][0] - P[0][0]), lin('#c9cdd1'));      // 屋顶机房
+      // 底下两层：通高的大玻璃 + 深色的门头（店面和大堂）
+      const B2 = new Geo(); wall(B2, inset(-0.02), 0, 7.2);
+      const glass = new THREE.Mesh(F.build(), toonMat({ map: texs[n % 3], vertexColors: true, spec: 0.7 }));
+      const base = new THREE.Mesh(B2.build(), toonMat({ color: new THREE.Color('#3d4650'), spec: 0.5 }));
+      glass.castShadow = base.castShadow = true; glass.receiveShadow = base.receiveShadow = true;
+      finish(cx, cz, 2400, G, [glass, base]);
+    }
+
+    // 交通中心：十层的粗野主义混凝土塔楼，横向的窗带；塔楼压在交通中心大楼靠 Kennedy Blvd 的那头
+    const [tc] = find(/^Journal Square Transportation Cent/);
+    if (tc) {
+      const b = tc.b, P = []; for (let i = 0; i < b.pts.length; i += 2) P.push([b.pts[i], b.pts[i + 1]]);
+      const inP = (x, z) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], q = P[j]; if ((a[1] > z) !== (q[1] > z) && x < (q[0] - a[0]) * (z - a[1]) / (q[1] - a[1]) + a[0]) c = !c; } return c; };
+      let best = null, bl = 0; for (let i = 0; i < P.length; i++) { const a = P[i], c = P[(i + 1) % P.length], L = Math.hypot(c[0] - a[0], c[1] - a[1]); if (L > bl) { bl = L; best = [a, c]; } }
+      const ang = Math.atan2(best[1][1] - best[0][1], best[1][0] - best[0][0]), ca = Math.cos(ang), sa = Math.sin(ang), TWd = 46, TD = 17;
+      // 在轮廓里找一个放得下塔楼的位置，越靠西（Kennedy Blvd）越好
+      let spot = null;
+      for (let x = Math.min(...P.map(p => p[0])); x < Math.max(...P.map(p => p[0])) && !spot; x += 3) for (let z = Math.min(...P.map(p => p[1])); z < Math.max(...P.map(p => p[1])); z += 3) {
+        if ([[1, 1], [1, -1], [-1, 1], [-1, -1], [0, 0]].every(([u, v]) => inP(x + ca * u * TWd / 2 - sa * v * TD / 2, z + sa * u * TWd / 2 + ca * v * TD / 2))) { spot = [x, z]; break; }
+      }
+      if (spot) {
+        const [x, z] = spot, G = new Geo(), CON = lin('#d9cfbb'), CON_D = lin('#bfb49c'), WIN = lin('#2b3138'), y0 = b.h, FL = 3.7, NF = 9;
+        const L = (u, y, v) => [x + ca * u - sa * v, y, z + sa * u + ca * v];
+        const slab = (yA, yB, du, dv, col) => { const p = L(0, (yA + yB) / 2, 0); G.box(p[0], p[1], p[2], TWd + du, yB - yA, TD + dv, ang, col, col); };
+        slab(0, y0 + 1.2, -2, -2, CON_D);
+        for (let f = 0; f < NF; f++) { const ya = y0 + 1.2 + f * FL; slab(ya, ya + FL * 0.45, 0.6, 0.6, CON); slab(ya + FL * 0.45, ya + FL, -0.3, -0.3, WIN); }      // 实心的窗下墙挑出来，窗带缩进去
+        const top = y0 + 1.2 + NF * FL; slab(top, top + 2.6, 0.6, 0.6, CON); slab(top + 2.6, top + 5.5, -14, -6, CON_D);
+        for (const s of [-1, 1]) { const p = L(s * (TWd / 2 + 2.6), (y0 + top) / 2 + 1, 0); G.box(p[0], p[1], p[2], 5, top - y0 + 2, 8, ang, CON_D, CON); }      // 两头的楼梯间
+        const sign = canvasTex(1024, 128, (c, W2, H2) => { c.fillStyle = '#1f4f9c'; c.fillRect(0, 0, W2, H2); c.fillStyle = '#fff'; c.textBaseline = 'middle'; c.font = '800 80px Arial, sans-serif'; c.textAlign = 'left'; c.fillText('PATH', 36, H2 / 2 + 4); c.font = '600 62px Arial, sans-serif'; c.textAlign = 'right'; c.fillText('Journal Square', W2 - 36, H2 / 2 + 4); });
+        const ex = []; for (const s of [-1, 1]) { const p = L(0, y0 - 2.2, s * (TD / 2 - 0.9)); ex.push(panel(sign, p, 14, 1.75, -sa * s, ca * s)); }
+        finish(x, z, 1800, G, ex);
+      }
+    }
+
+    // 下到 PATH 站的楼梯口：交通中心和 Journal Squared 之间的人行道上。玻璃雨棚 + 两边扶手 + 一级级往下、越往下越暗的楼梯
+    if (towers.length && tc) {
+      const t0 = map.buildings[towers[0].bi], c0 = map.buildings[tc.bi], mx = ((t0.x0 + t0.x1) / 2 + (c0.x0 + c0.x1) / 2) / 2, mz = ((t0.z0 + t0.z1) / 2 + (c0.z0 + c0.z1) / 2) / 2;
+      const spot = freeSpot(mx, mz, 2.2, 60);
+      if (spot) {
+        const [x, z] = spot, l = map.locate(x, z, LOC), Pp = { dx: 1, dz: 0 }; if (l.seg) pointAt(l.seg, l.s, Pp);
+        const h = Math.atan2(Pp.dz, Pp.dx), ca = Math.cos(h), sa = Math.sin(h), G = new Geo(), LEN = 6.5, WD = 2.6, FR = lin('#aeb6bf'), BLUE = lin('#1f4f9c');
+        const L = (u, y, v) => [x + ca * u - sa * v, y, z + sa * u + ca * v];
+        // 楼梯：贴图画成一级一级往下，越远越暗，最后是黑的；两边一圈矮墙和扶手
+        const stairs = canvasTex(128, 512, (c, W2, H2) => { for (let k = 0; k < 24; k++) { const t = k / 24, v = Math.round(200 * (1 - t) ** 1.6 + 12); c.fillStyle = `rgb(${v},${v},${v + 4})`; c.fillRect(0, k * H2 / 24, W2, H2 / 24); c.fillStyle = `rgba(0,0,0,${0.35 + t * 0.4})`; c.fillRect(0, (k + 1) * H2 / 24 - 4, W2, 4); } c.fillStyle = '#e8b631'; c.fillRect(0, 0, W2, 6); });
+        { const a = L(-LEN / 2, 0.03, -WD / 2), b = L(LEN / 2, 0.03, -WD / 2), c = L(LEN / 2, 0.03, WD / 2), d = L(-LEN / 2, 0.03, WD / 2), F = new Geo(); F.quadN([d, c, b, a], [UP, UP, UP, UP], [1, 1, 1], [[0, 1], [0, 0], [1, 0], [1, 1]]); var stairMesh = new THREE.Mesh(F.build(), toonMat({ map: stairs, vertexColors: true })); stairMesh.renderOrder = 2; }
+        for (const s of [-1, 1]) { const p = L(0, 0.45, s * (WD / 2 + 0.12)); G.box(p[0], p[1], p[2], LEN + 0.24, 0.9, 0.24, h, lin('#c9c4ba')); const q = L(0, 1.0, s * (WD / 2 + 0.12)); G.box(q[0], q[1], q[2], LEN, 0.05, 0.06, h, FR); }
+        { const p = L(LEN / 2 + 0.12, 0.45, 0); G.box(p[0], p[1], p[2], 0.24, 0.9, WD + 0.48, h, lin('#c9c4ba')); }
+        for (const u of [-LEN / 2, 0, LEN / 2]) for (const s of [-1, 1]) { const p = L(u, 1.6, s * (WD / 2 + 0.12)); G.box(p[0], p[1], p[2], 0.12, 3.2, 0.12, h, FR); }
+        const roof = L(0, 3.25, 0); G.box(roof[0], roof[1], roof[2], LEN + 1.2, 0.16, WD + 1.2, h, lin('#e9edf0'));
+        const band = L(-LEN / 2 - 0.62, 2.95, 0); G.box(band[0], band[1], band[2], 0.1, 0.5, WD + 1.2, h, BLUE);
+        const sign = canvasTex(512, 96, (c, W2, H2) => { c.fillStyle = '#1f4f9c'; c.fillRect(0, 0, W2, H2); c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = '800 58px Arial, sans-serif'; c.fillText('PATH ↓', W2 / 2, H2 / 2 + 3); });
+        const s1 = panel(sign, L(-LEN / 2 - 0.68, 2.95, 0), WD + 1.1, 0.5, -ca, -sa);
+        finish(x, z, 400, G, [stairMesh, s1]); occupy(x, z, 4);
+      }
     }
   }
   return out;

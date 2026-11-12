@@ -1,6 +1,6 @@
 // 会动的车和行人：实例化网格，每帧按模拟结果摆位置。行人的腿和胳膊是单独的实例，走路时前后摆。
 import * as THREE from 'three';
-import { carModel, pedParts } from './models.js';
+import { carModel, pedParts, CAR_TYPES, pickCarType } from './models.js';
 import { toonMat } from './toon.js';
 import { CAR_COLORS } from './world.js';
 
@@ -9,17 +9,17 @@ const SHIRTS = ['#c2463b', '#2f6a86', '#e3dccb', '#cf9a3a', '#3d8f8a', '#5b5f6b'
 export function buildActors(scene, max = 48) {
   const paint = toonMat({ vertexColors: true, spec: 1, rim: 0.5, smooth: true, paint: true, glass: 0.5 }), cloth = toonMat({ vertexColors: true, paint: 'tint', smooth: true });
   const mk = (geo, mat, n = max) => { const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0; m.frustumCulled = false; m.castShadow = m.receiveShadow = true; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m); return m; };
-  const PP = pedParts(), sedan = mk(carModel('sedan'), paint), suv = mk(carModel('suv'), paint), body = mk(PP.body, cloth), leg = mk(PP.leg, cloth, max * 2), arm = mk(PP.arm, cloth, max * 2);
+  const PP = pedParts(), carM = Object.fromEntries(Object.keys(CAR_TYPES).map(t => [t, mk(carModel(t), paint)])), body = mk(PP.body, cloth), leg = mk(PP.leg, cloth, max * 2), arm = mk(PP.arm, cloth, max * 2);
   const cols = CAR_COLORS.map(c => new THREE.Color(c)), shirts = SHIRTS.map(c => new THREE.Color(c)), WHITE = new THREE.Color(1, 1, 1);
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), Q2 = new THREE.Quaternion(), QL = new THREE.Quaternion(), V = new THREE.Vector3(), O = new THREE.Vector3(), S = new THREE.Vector3(1, 1, 1), UP = new THREE.Vector3(0, 1, 0), FW = new THREE.Vector3(1, 0, 0), SIDE = new THREE.Vector3(0, 0, 1);
   return {
     update(T, t) {
-      let a = 0, b = 0, k = 0;
+      let k = 0; const used = {};
       for (const c of T.cars) {
-        const m = c.suv ? suv : sedan, i = c.suv ? b++ : a++; if (i >= max) continue;
-        Q.setFromAxisAngle(UP, -c.h); M.compose(V.set(c.x, c.y || 0, c.z), Q, S); m.setMatrixAt(i, M);
+        const ty = c.ty || (c.ty = pickCarType(c.tr ?? 0)), m = carM[ty], i = used[ty] = (used[ty] || 0) + 1; if (i > max) continue;
+        Q.setFromAxisAngle(UP, -c.h); M.compose(V.set(c.x, c.y || 0, c.z), Q, S); m.setMatrixAt(i - 1, M);
         // 被撞停住的车打双闪：车身颜色一明一暗
-        m.setColorAt(i, c.hitT > 0 && (t * 2.6) % 1 < 0.5 ? WHITE.copy(cols[c.col % cols.length]).multiplyScalar(1.6) : cols[c.col % cols.length]);
+        m.setColorAt(i - 1, c.hitT > 0 && (t * 2.6) % 1 < 0.5 ? WHITE.copy(cols[c.col % cols.length]).multiplyScalar(1.6) : cols[c.col % cols.length]);
       }
       for (const p of T.peds) {
         if (k >= max) break;
@@ -45,7 +45,7 @@ export function buildActors(scene, max = 48) {
         }
         k++;
       }
-      for (const [m, n] of [[sedan, a], [suv, b], [body, k], [leg, k * 2], [arm, k * 2]]) { m.count = Math.min(n, m.instanceMatrix.count); m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; }
+      for (const [m, n] of [...Object.entries(carM).map(([t, m]) => [m, used[t] || 0]), [body, k], [leg, k * 2], [arm, k * 2]]) { m.count = Math.min(n, m.instanceMatrix.count); m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; }
     },
   };
 }

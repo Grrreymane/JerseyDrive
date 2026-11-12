@@ -5,6 +5,7 @@ import { pointAt, hash } from '../sim/map.js';
 import { Geo, lin } from './geo.js';
 import { toonMat } from './toon.js';
 import * as K from './kit.js';
+import { REPLACED } from './landmarks.js';
 
 const GROUND_H = 3.9, BCELL = 140, REVEAL = 0.2;
 const N4 = (n) => [n, n, n, n], UPN = [0, 1, 0];
@@ -341,7 +342,7 @@ export function buildBuildings(map, group, occupy, isFree) {
   const ALWAYS = new Set(['awningS', 'awningP']), CAST = new Set(['awningS', 'awningP', 'stoop', 'pilaster', 'signBoard', 'bladeSign']);
   // ---------- 分块：只建玩家周围的，走远了卸掉。整张地图一次建完要好几个 G 内存 ----------
   for (let bi = 0; bi < map.raw.buildings.length; bi++) {
-    if (map.buildings[bi].skip) continue;
+    if (map.buildings[bi].skip || REPLACED.test(map.raw.buildings[bi].n || '')) continue;
     const B = map.buildings[bi], cx = (B.x0 + B.x1) / 2, cz = (B.z0 + B.z1) / 2, k = Math.floor(cx / BCELL) + ',' + Math.floor(cz / BCELL);
     let c = bcells.get(k); if (!c) bcells.set(k, c = { list: [], box: [1e9, 1e9, -1e9, -1e9], built: false, near: null, g: null, hi: null, lo: null });
     c.list.push(bi); c.box[0] = Math.min(c.box[0], B.x0); c.box[1] = Math.min(c.box[1], B.z0); c.box[2] = Math.max(c.box[2], B.x1); c.box[3] = Math.max(c.box[3], B.z1);

@@ -57,7 +57,7 @@ function spawnCar(T, pl) {
     const a0 = T.rnd() * 6.2832, r0 = 70 + T.rnd() * (SPAWN_R - 70), seg = map.locate(pl.x + Math.cos(a0) * r0, pl.z + Math.sin(a0) * r0, P).seg; if (!seg || seg.useLen < 34) continue;
     const mx = seg.px[seg.n >> 1], mz = seg.pz[seg.n >> 1], d = Math.hypot(mx - pl.x, mz - pl.z); if (d > SPAWN_R + 150) continue;
     const fwd = seg.lb === 0 || T.rnd() < 0.5; if (!useLane(seg, fwd)) continue;
-    const c = { id: T.nextId++, kind: 'car', mode: 'seg', seg, fwd, idx: Math.floor(T.rnd() * useLane(seg, fwd)), u: 6 + T.rnd() * (seg.useLen - 24), v: 0, L: 4.5, W: 1.8, col: Math.floor(T.rnd() * 12), suv: T.rnd() < 0.3, wait: 0, stopT: -1, x: 0, z: 0, h: 0, plan: null, w: 0 };
+    const c = { id: T.nextId++, kind: 'car', mode: 'seg', seg, fwd, idx: Math.floor(T.rnd() * useLane(seg, fwd)), u: 6 + T.rnd() * (seg.useLen - 24), v: 0, L: 4.5, W: 1.8, col: Math.floor(T.rnd() * 12), tr: T.rnd(), wait: 0, stopT: -1, x: 0, z: 0, h: 0, plan: null, w: 0 };
     poseOnSeg(c);
     if (Math.hypot(c.x - pl.x, c.z - pl.z) < 55) continue;
     if (T.cars.some(o => Math.hypot(o.x - c.x, o.z - c.z) < 14)) continue;

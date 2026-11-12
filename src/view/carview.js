@@ -19,7 +19,7 @@ export function buildCarView(scene, renderer, navCanvas) {
   const L1 = (o) => { o.layers.set(1); o.frustumCulled = false; root.add(o); return o; };
 
   // 车外模型（只在车外镜头里显示）
-  const ext = new THREE.Mesh(carModel('sedan', BODY), toonMat({ vertexColors: true, spec: 1, rim: 0.5, smooth: true, glass: 0.5 }));
+  const ext = new THREE.Mesh(carModel('sedan', BODY), toonMat({ vertexColors: true, spec: 1, rim: 0.5, smooth: true, glass: 0.5 })), WHITE = [1, 1, 1];
   ext.position.x = CAR.center; ext.scale.set(CAR.L / 4.56, 1, CAR.W / 1.83); ext.layers.set(2); ext.castShadow = true; root.add(ext);
 
   // ---------- 车漆件：引擎盖 ----------
@@ -33,9 +33,9 @@ export function buildCarView(scene, renderer, navCanvas) {
       }
       return row;
     });
-    GP.loft(rows, { orient: (p, i) => [i >= xs.length - 2 ? 1 : 0, 1, p[2] * 0.3], color: () => BODY });
+    GP.loft(rows, { orient: (p, i) => [i >= xs.length - 2 ? 1 : 0, 1, p[2] * 0.3], color: () => WHITE });
   }
-  const hoodPaint = toonMat({ vertexColors: true, spec: 0.35, smooth: true, glass: 0.3 });      // 引擎盖是贴着看的，高光太强会发白
+  const hoodPaint = toonMat({ vertexColors: true, spec: 0.35, smooth: true, glass: 0.3, color: new THREE.Color().setRGB(...BODY) });      // 车漆颜色放在材质上，换颜色不用重建      // 引擎盖是贴着看的，高光太强会发白
   L1(new THREE.Mesh(GP.build(), hoodPaint));
 
   // ---------- 内饰 ----------
@@ -127,7 +127,7 @@ export function buildCarView(scene, renderer, navCanvas) {
   L1(new THREE.Mesh(GS.build(), toonMat({ vertexColors: true, smooth: true, rim: 0.25 })));
   L1(new THREE.Mesh(GH.build(), toonMat({ vertexColors: true, spec: 0.5 })));
   // 车外的后备箱盖（回头或看内后视镜时能看到一点）
-  const GT = new Geo(); GT.box(-0.72, 0.9, 0, 0.4, 0.12, 1.76, 0, BODY); L1(new THREE.Mesh(GT.build(), hoodPaint));
+  const GT = new Geo(); GT.box(-0.72, 0.9, 0, 0.4, 0.12, 1.76, 0, WHITE); L1(new THREE.Mesh(GT.build(), hoodPaint));
 
   // ---------- 仪表：一张实时画的贴图 ----------
   const cc = document.createElement('canvas'); cc.width = 512; cc.height = 160; const cx = cc.getContext('2d');
@@ -276,6 +276,8 @@ export function buildCarView(scene, renderer, navCanvas) {
     const m = mirrors[[0, 1, 0, 2][view.frame & 3]]; renderer.setRenderTarget(m.rt); renderer.render(scene, m.cam);
     renderer.setRenderTarget(null);
   };
+  /** 换车：车型（车外镜头里的样子）+ 车漆颜色（车里能看到的引擎盖、后视镜壳也跟着变） */
+  view.setCar = (type, rgb) => { ext.geometry.dispose(); ext.geometry = carModel(type, rgb); hoodPaint.color.setRGB(...rgb); shellPaint.color.setRGB(...rgb); };
   view.resize = (w, h) => { camera.aspect = w / h; camera.fov = w / h > 1.5 ? 58 : 66; camera.updateProjectionMatrix(); };
   return view;
 }

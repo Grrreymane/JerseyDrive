@@ -9,6 +9,7 @@ import { buildSky } from './view/sky.js';
 import { buildPost } from './view/post.js';
 import { STYLES, setRamp, toonU } from './view/toon.js';
 import { buildCarView } from './view/carview.js';
+import { CAR_TYPES } from './view/models.js';
 import { signDataURL, shortName } from './view/signs.js';
 import { EVENT_TEXT, EVENT_SHORT, hintText, ALERT_TEXT, SIGN_BOOK, SHIFT_MSG } from './rulebook.js';
 import { makeAudio } from './view/audio.js';
@@ -75,6 +76,18 @@ function buildLessonList() {
   for (const b of $('lessonList').children) b.onclick = () => { if (!ready) { wantLesson = +b.dataset.i; buildLessonList(); return; } audio.unlock(); startLesson(+b.dataset.i); };
 }
 buildLessonList(); buildStartList();
+// 自己的车：车型 + 颜色，开始界面上选，存在本地
+const MY_COLORS = ['#2a6bd9', '#c8302b', '#f2f0ea', '#202226', '#8f969e', '#e8b631', '#2f7a55', '#e07a2f'];
+let carView = null, myCar = { type: 'sedan', color: MY_COLORS[0] }; try { Object.assign(myCar, JSON.parse(localStorage.getItem('jdCar')) || {}); } catch { /* 存不了就用默认 */ }
+if (!CAR_TYPES[myCar.type]) myCar.type = 'sedan';
+const applyCar = () => { const c = new THREE.Color(myCar.color); if (carView) carView.setCar(myCar.type, [c.r, c.g, c.b]); try { localStorage.setItem('jdCar', JSON.stringify(myCar)); } catch { /* 同上 */ } buildCarPick(); };
+function buildCarPick() {
+  $('carTypes').innerHTML = Object.entries(CAR_TYPES).map(([id, t]) => `<button class="${id === myCar.type ? '' : 'ghost'}" data-id="${id}">${t.name}</button>`).join('');
+  $('carColors').innerHTML = MY_COLORS.map(c => `<button class="${c === myCar.color ? 'on' : ''}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join('');
+  for (const b of $('carTypes').children) b.onclick = () => { myCar.type = b.dataset.id; applyCar(); };
+  for (const b of $('carColors').children) b.onclick = () => { myCar.color = b.dataset.c; applyCar(); };
+}
+applyCar();
 await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));      // 先让浏览器把界面画出来，再开始加载（建场景那几秒主线程是占满的）
 const raw = await (await fetch(MAPS[region])).json();
 const map = prepareMap(raw);
@@ -88,7 +101,7 @@ if (world.waterCanvas) {
 }
 // 导航画面：一张画布，既贴在车里的中控屏上，也给车外视角的圆形小地图用
 const nav = document.createElement('canvas'); nav.width = 640; nav.height = 380;
-const view = buildCarView(scene, renderer, nav);
+const view = buildCarView(scene, renderer, nav); carView = view; applyCar();
 const actors = buildActors(scene);
 // 车流和行人（地址加 ?empty 关掉，空城练习）
 const trafficOn = !params.has('empty') && !(params.has('spot') && !params.has('traffic')) && !params.has('bench');
