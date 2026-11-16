@@ -24,7 +24,10 @@ kbd { display: inline-block; min-width: 1.6em; padding: 0 0.4em; border: 1px sol
 #preview .ex b { font-size: 17px; } #preview .ex.no { border-color: rgba(255, 90, 79, 0.6); color: #ffb3ad; } #preview .ex.no b { color: var(--bad); }
 #preview .ex small { color: var(--dim); }
 
-#toasts { position: absolute; left: 16px; top: 74px; width: min(360px, 34vw); display: flex; flex-direction: column; gap: 8px; }
+/* 左上一列：导航在上，违规 / 提示卡片排在它下面（以前两个都钉在同一个位置，叠在一起） */
+#leftCol { position: absolute; left: 16px; top: 74px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; pointer-events: none; }
+#leftCol > * { pointer-events: auto; }
+#toasts { width: min(360px, 34vw); display: flex; flex-direction: column; gap: 8px; }
 .toast { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--bad); border-radius: 10px; padding: 9px 13px; backdrop-filter: blur(6px); animation: tin 0.25s ease-out; transition: opacity 0.5s; }
 .toast.minor { border-left-color: var(--minor); } .toast.good { border-left-color: var(--good); } .toast.info { border-left-color: var(--accent); }
 .toast h4 { margin: 0; font-size: 15px; } .toast p { margin: 3px 0 0; color: #cfd3d9; font-size: 13px; } .toast .pen { float: right; color: var(--bad); font-weight: 700; font-size: 13px; margin-left: 8px; }
@@ -81,7 +84,7 @@ button.ghost { background: rgba(255, 255, 255, 0.07); color: var(--text); font-w
 @media (max-width: 900px) { #lessonList { grid-template-columns: 1fr; } #lessonBox { width: 220px; } }
 #startList { display: flex; gap: 7px; margin: 4px 0 14px; flex-wrap: wrap; } #startList button { padding: 7px 13px; font-size: 14px; }
 /* 导航提示（左上角，路名下面） */
-#navBox { position: absolute; top: 74px; left: 16px; display: flex; gap: 12px; align-items: center; background: #1a56c4; border-radius: 12px; padding: 9px 16px 9px 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
+#navBox { display: flex; gap: 12px; align-items: center; background: #1a56c4; border-radius: 12px; padding: 9px 16px 9px 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
 #navArrow { font-size: 34px; line-height: 1; width: 40px; text-align: center; } #navText { display: block; font-weight: 700; font-size: 17px; } #navSub { color: #cfe0ff; font-size: 13px; }
 #btnNavClear { position: absolute; right: 18px; top: 18px; background: #202124; color: #fff; }
 /* 大地图：搜索框、选中地点后的操作条 */

@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { LANE_W, XWALK_NEAR, XWALK_FAR, STOP_LINE, pointAt, offsetPoint, segY, signalState, hash, turnType } from '../sim/map.js';
 import { makeSignAtlas, makeNameAtlas } from './signs.js';
-import { Geo, ChunkGeo, lin } from './geo.js';
+import { Geo, CellGeo, lin } from './geo.js';
 import { carModel, carModelLow, CAR_TYPES, pickCarType, treeModel, treePit, TREE_KINDS, lampPost, hydrant } from './models.js';
 import { toonMat } from './toon.js';
 import { buildBuildings } from './buildings.js';
@@ -125,106 +125,114 @@ export function buildWorld(map, scene) {
     add(g, toonMat({ color: new THREE.Color('#4c82ad'), alphaMap: tex, alphaTest: 0.5, side: DS, depthFunc: THREE.AlwaysDepth, spec: 0.5 }), -29);
   }
 
-  // ---------- 路面 + 路口 + 公园 ----------
+  // ---------- 按块现做的几何：路面、公园、标线、路缘、排水沟、高架、标志和杆子 ----------
+  // 整张图一次全做出来要占几百兆内存，图越大越多。改成每一层写成一个“pass”（给一批路段 / 路口，往各层的几何里画），
+  // 车附近 1200 米见方的块才跑一遍 pass 生成网格，走远了就扔掉（见文件后面的 streamCells）。
+  // 归属规则和以前的 ChunkGeo 一样：一个面按它的第一个点落在哪一块算，所以块与块之间不重不漏。
+  const LAYERS = {}, passes = [], SZ = 1200;
+  const layer = (name, mat, order = 0, cast = false, up = false) => { LAYERS[name] = { mat, order, cast, up }; };
   const texAsphalt = canvasTex(256, speckle('#666c78', 0.08, 5000));      // 偏蓝的灰
-  const Groad = new ChunkGeo(), Gpark = new ChunkGeo();
-  for (const s of map.segs) {
-    const v = 0.93 + hash(s.id) * 0.12, A = s.trimA - 0.05, B = s.len - s.trimB + 0.05;
-    if (!s.high) { strip(Groad, s, A, B, -s.halfW, s.halfW, 0, [v, v, v], 1 / 5); continue; }
-    // 高架和匝道另外建（见“高架”一节）；但它们贴着地面的那几段（坡道落地后、高速的地面段）按地面路画：
-    // 桥面层贴地时比人行道那层只高 3 厘米，会被盖住，只剩标线浮在人行道上
-    for (let u = A, u0 = -1; ; u += 1) {
-      const uu = Math.min(u, B), y = segY(s, uu), low = y <= GROUND_Y && y >= -0.02;
-      if (low && u0 < 0) u0 = uu;
-      if ((!low || uu >= B) && u0 >= 0) { if (uu - u0 > 0.5) strip(Groad, s, u0, uu, -s.halfW, s.halfW, 0, [v, v, v], 1 / 5); u0 = -1; }
-      if (uu >= B) break;
+  layer('road', toonMat({ map: texAsphalt, vertexColors: true, side: DS, depthFunc: THREE.AlwaysDepth }), -20);
+  passes.push((L, segs, juncs) => {
+    const Groad = L.road;
+    for (const s of segs) {
+      const v = 0.93 + hash(s.id) * 0.12, A = s.trimA - 0.05, B = s.len - s.trimB + 0.05;
+      if (!s.high) { strip(Groad, s, A, B, -s.halfW, s.halfW, 0, [v, v, v], 1 / 5); continue; }
+      // 高架和匝道另外建（见“高架”一节）；但它们贴着地面的那几段（坡道落地后、高速的地面段）按地面路画：
+      // 桥面层贴地时比人行道那层只高 3 厘米，会被盖住，只剩标线浮在人行道上
+      for (let u = A, u0 = -1; ; u += 1) {
+        const uu = Math.min(u, B), y = segY(s, uu), low = y <= GROUND_Y && y >= -0.02;
+        if (low && u0 < 0) u0 = uu;
+        if ((!low || uu >= B) && u0 >= 0) { if (uu - u0 > 0.5) strip(Groad, s, u0, uu, -s.halfW, s.halfW, 0, [v, v, v], 1 / 5); u0 = -1; }
+        if (uu >= B) break;
+      }
     }
-  }
-  for (const j of map.juncs) {
-    const p = j.poly; if (j.y > 0.3) continue;
-    for (let i = 1; i < p.length - 1; i++) Groad.flat(p[0][0], p[0][1], p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], p[i + 1][0], p[i + 1][1], 0, [0.97, 0.97, 0.97], 1 / 5);
-  }
-  add(Groad.build(), toonMat({ map: texAsphalt, vertexColors: true, side: DS, depthFunc: THREE.AlwaysDepth }), -20);
+    for (const j of juncs) {
+      const p = j.poly; if (j.y > 0.3) continue;
+      for (let i = 1; i < p.length - 1; i++) Groad.flat(p[0][0], p[0][1], p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], p[i + 1][0], p[i + 1][1], 0, [0.97, 0.97, 0.97], 1 / 5);
+    }
+  });
   const grass = lin('#7fb35a');
-  const parkPolys = [];
-  for (const flat of map.raw.parks) {
-    const pts = []; for (let i = 0; i < flat.length; i += 2) pts.push(new THREE.Vector2(flat[i], flat[i + 1]));
-    parkPolys.push(pts);
-    for (const t of THREE.ShapeUtils.triangulateShape(pts, [])) { const a = pts[t[0]], b = pts[t[1]], c = pts[t[2]]; Gpark.flat(a.x, a.y, b.x, b.y, c.x, c.y, c.x, c.y, CH, grass, 1 / 5); }
-  }
-  add(Gpark.build(), toonMat({ map: canvasTex(128, speckle('#ffffff', 0.12, 1500)), vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -25);
+  const parkPolys = map.raw.parks.map(flat => { const pts = []; for (let i = 0; i < flat.length; i += 2) pts.push(new THREE.Vector2(flat[i], flat[i + 1])); return pts; });
+  layer('park', toonMat({ map: canvasTex(128, speckle('#ffffff', 0.12, 1500)), vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -25);
+  passes.push((L, segs, juncs, parks) => {
+    for (const pts of parks) for (const t of THREE.ShapeUtils.triangulateShape(pts, [])) { const a = pts[t[0]], b = pts[t[1]], c = pts[t[2]]; L.park.flat(a.x, a.y, b.x, b.y, c.x, c.y, c.x, c.y, CH, grass, 1 / 5); }
+  });
 
   // ---------- 标线 ----------
-  const Gw = new ChunkGeo(), Gy = new ChunkGeo(), W = [0.97, 0.97, 0.97], Y = lin('#ffc61a');
+  const W = [0.97, 0.97, 0.97], Y = lin('#ffc61a');
   const ctl = (j) => j && (j.control === 'signal' || j.control === 'stop' || j.control === 'allway');
-  for (const s of map.segs) {
-    if (s.useLen < 6 || s.high) continue;
-    const s0 = s.trimA, s1 = s.len - s.trimB, room = s.useLen > 15;
-    const legA = map.legOf(s.ja, s, 'a'), legB = map.legOf(s.jb, s, 'b');
-    const xa = ctl(s.ja) && room, xb = ctl(s.jb) && room;
-    const a0 = s0 + (xa ? STOP_LINE + 0.6 : 0), b0 = s1 - (xb ? STOP_LINE + 0.6 : 0);
-    if (s.lb > 0) { strip(Gy, s, a0, b0, s.cOff - 0.2, s.cOff - 0.07, 0, Y); strip(Gy, s, a0, b0, s.cOff + 0.07, s.cOff + 0.2, 0, Y); }
-    for (let k = 1; k < s.lf; k++) { const o = s.cOff + k * LANE_W, m = Math.max(a0, b0 - 24); dashed(Gw, s, a0, m, o, 0.13, 0, W); strip(Gw, s, m, b0, o - 0.07, o + 0.07, 0, W); }
-    for (let k = 1; k < s.lb; k++) { const o = s.cOff - k * LANE_W, m = Math.min(b0, a0 + 24); strip(Gw, s, a0, m, o - 0.07, o + 0.07, 0, W); dashed(Gw, s, m, b0, o, 0.13, 0, W); }
-    // 停止线
-    if (xb && legB.approach && (s.jb.control === 'signal' || legB.stop)) strip(Gw, s, s1 - STOP_LINE - 0.45, s1 - STOP_LINE, s.lb > 0 ? s.cOff + 0.15 : -s.halfW + 0.2, s.halfW - 0.2, 0, W);
-    if (xa && legA.approach && (s.ja.control === 'signal' || legA.stop)) strip(Gw, s, s0 + STOP_LINE, s0 + STOP_LINE + 0.45, -s.halfW + 0.2, s.cOff - 0.15, 0, W);
-    // 人行横道（斑马线）
-    for (const [on, sa, sb] of [[xa, s0 + XWALK_NEAR, s0 + XWALK_FAR], [xb, s1 - XWALK_FAR, s1 - XWALK_NEAR]]) {
-      if (!on) continue;
-      for (let o = -s.halfW + 0.5; o + 0.55 < s.halfW - 0.3; o += 1.25) strip(Gw, s, sa, sb, o, o + 0.55, 0, W);
+  layer('mark', toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -10);      // 用受光材质，标线才会被阴影盖住
+  passes.push((L, segs) => {
+    const Gw = L.mark, Gy = L.mark;
+    for (const s of segs) {
+      if (s.useLen < 6 || s.high) continue;
+      const s0 = s.trimA, s1 = s.len - s.trimB, room = s.useLen > 15;
+      const legA = map.legOf(s.ja, s, 'a'), legB = map.legOf(s.jb, s, 'b');
+      const xa = ctl(s.ja) && room, xb = ctl(s.jb) && room;
+      const a0 = s0 + (xa ? STOP_LINE + 0.6 : 0), b0 = s1 - (xb ? STOP_LINE + 0.6 : 0);
+      if (s.lb > 0) { strip(Gy, s, a0, b0, s.cOff - 0.2, s.cOff - 0.07, 0, Y); strip(Gy, s, a0, b0, s.cOff + 0.07, s.cOff + 0.2, 0, Y); }
+      for (let k = 1; k < s.lf; k++) { const o = s.cOff + k * LANE_W, m = Math.max(a0, b0 - 24); dashed(Gw, s, a0, m, o, 0.13, 0, W); strip(Gw, s, m, b0, o - 0.07, o + 0.07, 0, W); }
+      for (let k = 1; k < s.lb; k++) { const o = s.cOff - k * LANE_W, m = Math.min(b0, a0 + 24); strip(Gw, s, a0, m, o - 0.07, o + 0.07, 0, W); dashed(Gw, s, m, b0, o, 0.13, 0, W); }
+      // 停止线
+      if (xb && legB.approach && (s.jb.control === 'signal' || legB.stop)) strip(Gw, s, s1 - STOP_LINE - 0.45, s1 - STOP_LINE, s.lb > 0 ? s.cOff + 0.15 : -s.halfW + 0.2, s.halfW - 0.2, 0, W);
+      if (xa && legA.approach && (s.ja.control === 'signal' || legA.stop)) strip(Gw, s, s0 + STOP_LINE, s0 + STOP_LINE + 0.45, -s.halfW + 0.2, s.cOff - 0.15, 0, W);
+      // 人行横道（斑马线）
+      for (const [on, sa, sb] of [[xa, s0 + XWALK_NEAR, s0 + XWALK_FAR], [xb, s1 - XWALK_FAR, s1 - XWALK_NEAR]]) {
+        if (!on) continue;
+        for (let o = -s.halfW + 0.5; o + 0.55 < s.halfW - 0.3; o += 1.25) strip(Gw, s, sa, sb, o, o + 0.55, 0, W);
+      }
     }
-  }
-  add(Gw.build(), toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -10);      // 用受光材质，标线才会被阴影盖住
-  add(Gy.build(), toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -10);
+  });
 
-  // ---------- 路缘石：立面略带斜度 + 倒角 + 顶面 ----------
-  let nCurbSkip = 0; const Gc = new ChunkGeo(), Gtac = new ChunkGeo(), CURB = lin('#d9d6cf'), CURB_D = lin('#c2bfb8');
-  const curbRun = (ax, az, bx, bz, nx, nz) => {    // n 指向人行道一侧
-    // 这段路缘外侧其实是另一条路的路面（两条路挨着、交叠、斜着汇入）：不画，不然一道路缘横在路中间
-    const mx = (ax + bx) / 2 + nx * 0.7, mz = (az + bz) / 2 + nz * 0.7; if (map.onRoad(mx, mz, 0, 0)) { nCurbSkip++; return; }
-    const P = (x, z, d, y) => [x + nx * d, y, z + nz * d], f = [-nx * 0.98, 0.2, -nz * 0.98], c = [-nx * 0.64, 0.77, -nz * 0.64], u = [0, 1, 0];
-    Gc.quadN([P(ax, az, 0, 0), P(bx, bz, 0, 0), P(bx, bz, 0.022, CH - 0.04), P(ax, az, 0.022, CH - 0.04)], [f, f, f, f], CURB_D);
-    Gc.quadN([P(ax, az, 0.022, CH - 0.04), P(bx, bz, 0.022, CH - 0.04), P(bx, bz, 0.07, CH), P(ax, az, 0.07, CH)], [c, c, c, c], CURB);
-    Gc.quadN([P(ax, az, 0.07, CH), P(bx, bz, 0.07, CH), P(bx, bz, 0.2, CH), P(ax, az, 0.2, CH)], [u, u, u, u], CURB);
-  };
-  for (const s of map.segs) {
-    if (s.useLen < 0.5 || s.high) continue;
-    const r = ribs(s, s.trimA, s.len - s.trimB);
-    for (const sg of [-1, 1]) for (let i = 1; i < r.length; i++) {
-      const a = r[i - 1], b = r[i];
-      curbRun(a.x + a.rx * s.halfW * sg, a.z + a.rz * s.halfW * sg, b.x + b.rx * s.halfW * sg, b.z + b.rz * s.halfW * sg, a.rx * sg, a.rz * sg);
+  // ---------- 路缘石：立面略带斜度 + 倒角 + 顶面；人行横道两头的黄色盲道砖 ----------
+  const CURB = lin('#d9d6cf'), CURB_D = lin('#c2bfb8'), TAC = lin('#f5c542');
+  layer('curb', toonMat({ vertexColors: true }));
+  layer('tac', toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -9);
+  passes.push((L, segs, juncs) => {
+    const Gc = L.curb, Gtac = L.tac;
+    const curbRun = (ax, az, bx, bz, nx, nz) => {    // n 指向人行道一侧
+      if (!Gc.near(ax, az, 2)) return;      // 这一小段不归要做的这块：不用算（下面的 onRoad 查询不便宜）
+      // 这段路缘外侧其实是另一条路的路面（两条路挨着、交叠、斜着汇入）：不画，不然一道路缘横在路中间
+      const mx = (ax + bx) / 2 + nx * 0.7, mz = (az + bz) / 2 + nz * 0.7; if (map.onRoad(mx, mz, 0, 0)) return;
+      const P = (x, z, d, y) => [x + nx * d, y, z + nz * d], f = [-nx * 0.98, 0.2, -nz * 0.98], c = [-nx * 0.64, 0.77, -nz * 0.64], u = [0, 1, 0];
+      Gc.quadN([P(ax, az, 0, 0), P(bx, bz, 0, 0), P(bx, bz, 0.022, CH - 0.04), P(ax, az, 0.022, CH - 0.04)], [f, f, f, f], CURB_D);
+      Gc.quadN([P(ax, az, 0.022, CH - 0.04), P(bx, bz, 0.022, CH - 0.04), P(bx, bz, 0.07, CH), P(ax, az, 0.07, CH)], [c, c, c, c], CURB);
+      Gc.quadN([P(ax, az, 0.07, CH), P(bx, bz, 0.07, CH), P(bx, bz, 0.2, CH), P(ax, az, 0.2, CH)], [u, u, u, u], CURB);
+    };
+    for (const s of segs) {
+      if (s.useLen < 0.5 || s.high) continue;
+      const r = ribs(s, s.trimA, s.len - s.trimB);
+      for (const sg of [-1, 1]) for (let i = 1; i < r.length; i++) {
+        const a = r[i - 1], b = r[i];
+        curbRun(a.x + a.rx * s.halfW * sg, a.z + a.rz * s.halfW * sg, b.x + b.rx * s.halfW * sg, b.z + b.rz * s.halfW * sg, a.rx * sg, a.rz * sg);
+      }
+      if (s.useLen <= 15) continue;
+      for (const [on, sa, sb] of [[ctl(s.ja), s.trimA + XWALK_NEAR + 0.3, s.trimA + XWALK_FAR - 0.3], [ctl(s.jb), s.len - s.trimB - XWALK_FAR + 0.3, s.len - s.trimB - XWALK_NEAR - 0.3]]) {
+        if (!on) continue;
+        strip(Gtac, s, sa, sb, s.halfW + 0.4, s.halfW + 1.0, CH, TAC); strip(Gtac, s, sa, sb, -s.halfW - 1.0, -s.halfW - 0.4, CH, TAC);
+      }
     }
-  }
-  // 人行横道两头的黄色盲道砖
-  const TAC = lin('#f5c542');
-  for (const s of map.segs) {
-    if (s.useLen <= 15 || s.high) continue;
-    for (const [on, sa, sb] of [[ctl(s.ja), s.trimA + XWALK_NEAR + 0.3, s.trimA + XWALK_FAR - 0.3], [ctl(s.jb), s.len - s.trimB - XWALK_FAR + 0.3, s.len - s.trimB - XWALK_NEAR - 0.3]]) {
-      if (!on) continue;
-      strip(Gtac, s, sa, sb, s.halfW + 0.4, s.halfW + 1.0, CH, TAC); strip(Gtac, s, sa, sb, -s.halfW - 1.0, -s.halfW - 0.4, CH, TAC);
+    for (const j of juncs) {
+      if (j.y > 0.3) continue;
+      const mouths = j.legs.map(l => [[l.ex - l.oz * l.w, l.ez + l.ox * l.w], [l.ex + l.oz * l.w, l.ez - l.ox * l.w]]);
+      const same = (p, q) => Math.abs(p[0] - q[0]) < 0.01 && Math.abs(p[1] - q[1]) < 0.01;
+      for (let i = 0; i < j.poly.length; i++) {
+        const p = j.poly[i], q = j.poly[(i + 1) % j.poly.length];
+        if (mouths.some(m => (same(m[0], p) && same(m[1], q)) || (same(m[1], p) && same(m[0], q)))) continue;
+        let nx = q[1] - p[1], nz = -(q[0] - p[0]); const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
+        if ((p[0] + q[0]) / 2 * nx + (p[1] + q[1]) / 2 * nz - (j.cx * nx + j.cz * nz) < 0) { nx = -nx; nz = -nz; }
+        curbRun(p[0], p[1], q[0], q[1], nx, nz);
+      }
     }
-  }
-  for (const j of map.juncs) {
-    if (j.y > 0.3) continue;
-    const mouths = j.legs.map(l => [[l.ex - l.oz * l.w, l.ez + l.ox * l.w], [l.ex + l.oz * l.w, l.ez - l.ox * l.w]]);
-    const same = (p, q) => Math.abs(p[0] - q[0]) < 0.01 && Math.abs(p[1] - q[1]) < 0.01;
-    for (let i = 0; i < j.poly.length; i++) {
-      const p = j.poly[i], q = j.poly[(i + 1) % j.poly.length];
-      if (mouths.some(m => (same(m[0], p) && same(m[1], q)) || (same(m[1], p) && same(m[0], q)))) continue;
-      let nx = q[1] - p[1], nz = -(q[0] - p[0]); const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
-      if ((p[0] + q[0]) / 2 * nx + (p[1] + q[1]) / 2 * nz - (j.cx * nx + j.cz * nz) < 0) { nx = -nx; nz = -nz; }
-      curbRun(p[0], p[1], q[0], q[1], nx, nz);
-    }
-  }
-  add(Gc.build(), toonMat({ vertexColors: true }));
+  });
   // 路边的排水沟（一条浅色混凝土带）、雨水篦子、井盖 —— 都是贴在路面上的薄片
   {
-    const Gg = new ChunkGeo(), holesM = [], grates = [], GUT = lin('#9a9c9f'), IRON = [0.07, 0.07, 0.08], IRON_L = [0.2, 0.2, 0.22], P = {};
+    const holesM = [], grates = [], GUT = lin('#9a9c9f'), IRON = [0.07, 0.07, 0.08], IRON_L = [0.2, 0.2, 0.22], P = {};
+    layer('gut', toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -15);
+    passes.push((L, segs) => { for (const s of segs) { if (s.useLen < 2 || s.high) continue; const s0 = s.trimA, s1 = s.len - s.trimB; strip(L.gut, s, s0, s1, s.halfW - 0.34, s.halfW, 0, GUT); strip(L.gut, s, s0, s1, -s.halfW, -s.halfW + 0.34, 0, GUT); } });
     for (const s of map.segs) {
-      if (s.useLen < 2 || s.high) continue; const s0 = s.trimA, s1 = s.len - s.trimB;
-      strip(Gg, s, s0, s1, s.halfW - 0.34, s.halfW, 0, GUT); strip(Gg, s, s0, s1, -s.halfW, -s.halfW + 0.34, 0, GUT);
-      if (s.useLen < 30) continue;
+      if (s.useLen < 30 || s.high) continue; const s0 = s.trimA, s1 = s.len - s.trimB;
       for (const sg of [-1, 1]) for (const sa of [s0 + XWALK_FAR + 2.2, s1 - XWALK_FAR - 3.2]) {       // 路口前后各一个雨水篦子
         offsetPoint(s, sa + 0.475, sg * (s.halfW - 0.27), P); grates.push([P.x, P.z, Math.atan2(P.dz, P.dx)]);
       }
@@ -232,7 +240,6 @@ export function buildWorld(map, scene) {
         offsetPoint(s, s0 + s.useLen * f, s.cOff + (s.lf > 0 ? 1 : -1) * LANE_W * 0.5 + (hash(s.id * 3 + f * 10) - 0.5) * 1.2, P); holesM.push([P.x, P.z, hash(s.id * 7 + f) * 6.28]);
       }
     }
-    add(Gg.build(), toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -15);
     // 井盖和雨水篦子：一个模型，按位置摆（实例化）。以前每个都单独画一遍，全图几万个，光它们就占两百多兆内存
     const one = new Geo(), N = 16, fan = (r, col) => { for (let k = 0; k < N; k++) { const t0 = k / N * Math.PI * 2, t1 = (k + 1) / N * Math.PI * 2; one.flat(0, 0, Math.cos(t0) * r, Math.sin(t0) * r, Math.cos(t1) * r, Math.sin(t1) * r, Math.cos(t1) * r, Math.sin(t1) * r, 0, col); } };
     fan(0.44, GUT); fan(0.38, IRON); fan(0.3, IRON_L); fan(0.26, IRON); fan(0.07, IRON_L);
@@ -250,12 +257,11 @@ export function buildWorld(map, scene) {
       }
     }
   }
-  add(Gtac.build(), toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -9);
 
   // ---------- 高架：桥面、两侧护栏、桥底、桥墩、车道线 ----------
   // 高度来自地图数据（seg.ys）：高架段在 7.5 米，匝道按 5.5% 的坡接到地面。用正常的深度测试画，和地面那几层互不干扰
   {
-    const Gb = new ChunkGeo(), Gbm = new ChunkGeo(), DECK = lin('#5d626d'), CONC = lin('#b9b6ae'), CONC_D = lin('#9a978f'), WH = [0.97, 0.97, 0.97], YE = lin('#ffc61a'), UPN = [0, 1, 0], DN = [0, -1, 0], LIFT = 0.05, TH = 0.9;
+    const DECK = lin('#5d626d'), CONC = lin('#b9b6ae'), CONC_D = lin('#9a978f'), WH = [0.97, 0.97, 0.97], YE = lin('#ffc61a'), UPN = [0, 1, 0], DN = [0, -1, 0], LIFT = 0.05, TH = 0.9;
     // 贴近地面的那一段要画在人行道那层（0.15 米）上面，不然匝道口会被地面盖住；往上、往下离开地面后回到真实高度
     const drawY = (y) => y >= 0 ? Math.max(y + LIFT, CH + 0.03) : y + LIFT + 0.13 * Math.max(0, 1 + y / 0.6);
     const fine = (seg, sA, sB) => {      // 比地面路切得密一点：坡道要跟着高度走
@@ -264,10 +270,15 @@ export function buildWorld(map, scene) {
       return out;
     };
     // 桥面单独分成几组网格，各用不同的深度偏移：并行的两幅路、匝道汇入的地方桥面是叠着的，同一高度的两层面不错开就会闪
-    const GbD = [new ChunkGeo(), new ChunkGeo(), new ChunkGeo()], GbJ = new ChunkGeo(), LB = {};
+    const LB = {};
+    layer('bb', toonMat({ vertexColors: true }), 0, true); layer('bj', toonMat({ vertexColors: true }), 0, true);
+    for (let k = 0; k < 3; k++) layer('bd' + k, toonMat({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: k + 1, polygonOffsetUnits: k + 1 }), 0, true);
+    layer('bm', toonMat({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
     const pt = (r, o, dy = 0) => [r.x + r.rx * o, r.y + dy, r.z + r.rz * o];
     const band = (G, a, b, o0, o1, dy, col) => G.quadN([pt(a, o0, dy), pt(a, o1, dy), pt(b, o1, dy), pt(b, o0, dy)], [UPN, UPN, UPN, UPN], col);
-    for (const s of map.segs) {
+    passes.push((L, segs, juncs) => {
+    const Gb = L.bb, GbJ = L.bj, Gbm = L.bm, GbD = [L.bd0, L.bd1, L.bd2];
+    for (const s of segs) {
       if (!s.high) continue;
       const r = fine(s, Math.max(0, s.trimA - 0.3), Math.min(s.len, s.len - s.trimB + 0.3)), w = s.halfW;
       for (let i = 1; i < r.length; i++) {
@@ -303,15 +314,12 @@ export function buildWorld(map, scene) {
         Gb.box(P.x, y - TH - 0.5, P.z, 1.9, 1.0, (w + 0.4) * 2, Math.atan2(P.dz, P.dx), CONC_D, CONC_D);      // 盖梁
       }
     }
-    for (const j of map.juncs) {      // 高架上的分流 / 合流口
+    for (const j of juncs) {      // 高架上的分流 / 合流口
       if (j.y <= 0.3) continue; const p = j.poly, y = j.y + LIFT;
       for (let i = 1; i < p.length - 1; i++) GbJ.flat(p[0][0], p[0][1], p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], p[i + 1][0], p[i + 1][1], y, DECK);
       if (j.y > 1.2) for (let i = 1; i < p.length - 1; i++) Gb.quadN([[p[0][0], y - TH, p[0][1]], [p[i][0], y - TH, p[i][1]], [p[i + 1][0], y - TH, p[i + 1][1]], [p[i + 1][0], y - TH, p[i + 1][1]]], [DN, DN, DN, DN], CONC_D);
     }
-    add(Gb.build(), toonMat({ vertexColors: true }), 0, true);
-    add(GbJ.build(), toonMat({ vertexColors: true }), 0, true);
-    GbD.forEach((g, k) => add(g.build(), toonMat({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: k + 1, polygonOffsetUnits: k + 1 }), 0, true));
-    add(Gbm.build(), toonMat({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    });
   }
 
   // ---------- 建筑 ----------
@@ -327,18 +335,27 @@ export function buildWorld(map, scene) {
   const atlas = makeSignAtlas(256);
   const names = [...new Set(map.segs.map(s => s.name).filter(Boolean))];
   const nameAtlas = makeNameAtlas(names);
-  const Gs = new ChunkGeo(), Gn = new ChunkGeo(), Gm = new ChunkGeo(), Ga = new ChunkGeo();
+  const texSign = new THREE.CanvasTexture(atlas.canvas); texSign.colorSpace = THREE.SRGBColorSpace; texSign.anisotropy = 8;
+  const texName = new THREE.CanvasTexture(nameAtlas.canvas); texName.colorSpace = THREE.SRGBColorSpace; texName.anisotropy = 8;
+  layer('sign', new THREE.MeshBasicMaterial({ map: texSign, alphaTest: 0.5, side: THREE.FrontSide }), 0, false, true);
+  layer('name', new THREE.MeshBasicMaterial({ map: texName, side: THREE.FrontSide }), 0, false, true);
+  layer('arrow', new THREE.MeshBasicMaterial({ map: texSign, alphaTest: 0.5, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -8);
+  layer('metal', toonMat({ vertexColors: true, side: DS, smooth: true }), 0, true, true);
+  // 这一遍还有副作用：登记占位（后面的树、路灯、楼前台阶要避开杆子）、记下红绿灯灯泡的位置。只在开局对整张图跑一次（sidefx），按块生成时不再做
+  let Gs, Gn, Gm, Ga, sidefx = false;
   const METAL = lin('#9aa3ad'), DARK = lin('#2a2d33'), BACK = lin('#b4bac0'), YELLOW = lin('#f2b632');
   // 竖着的牌子：中心 (x,y,z)，正面朝 (fx,fz)
   const board = (G, x, y, z, fx, fz, w, h, uv) => {
     const rx = fz, rz = -fx, hw = w / 2, hh = h / 2, e = 0.012;
     G.quad(x - rx * hw + fx * e, y - hh, z - rz * hw + fz * e, x + rx * hw + fx * e, y - hh, z + rz * hw + fz * e, x + rx * hw + fx * e, y + hh, z + rz * hw + fz * e, x - rx * hw + fx * e, y + hh, z - rz * hw + fz * e, [1, 1, 1], uv);
   };
-  const post = (x, z, h, r = 0.35) => { Gm.cyl(x, 0, h, z, 0.04, 0.035, 7, METAL); occupy(x, z, r); };
+  const post = (x, z, h, r = 0.35) => { Gm.cyl(x, 0, h, z, 0.04, 0.035, 7, METAL); if (sidefx) occupy(x, z, r); };
   const backing = (x, y, z, fx, fz, w, h) => { const rx = fz, rz = -fx, hw = w / 2, hh = h / 2; Gm.quad(x + rx * hw, y - hh, z + rz * hw, x - rx * hw, y - hh, z - rz * hw, x - rx * hw, y + hh, z - rz * hw, x + rx * hw, y + hh, z + rz * hw, BACK, [0, 0, 1, 1]); };
 
   const lampAt = [];   // {x,y,z,fx,fz,j,group,kind}
-  for (const j of map.juncs) {
+  passes.push((L, segs, juncs) => {
+  Gs = L.sign; Gn = L.name; Gm = L.metal; Ga = L.arrow;
+  for (const j of juncs) {
     if (j.control === 'joint' || j.y > 0.3 || j.legs.some(l => l.segRef.high)) continue;
     for (const l of j.legs) {
       const seg = l.segRef, tx = -l.ox, tz = -l.oz, rtx = l.oz, rtz = -l.ox;      // t = 驶入方向，rt = 驶入方向的右手边
@@ -381,7 +398,7 @@ export function buildWorld(map, scene) {
         const hx = bx + rtx * latC, hz = bz + rtz * latC;
         let px = bx + rtx * (l.w + 1.3), pz = bz + rtz * (l.w + 1.3);
         if (map.bldDist(px, pz) < 0.5) { px = bx + rtx * (l.w + 0.45); pz = bz + rtz * (l.w + 0.45); }      // 杆子落进楼里了：往路边挪
-        occupy(px, pz, 0.8);
+        if (sidefx) occupy(px, pz, 0.8);
         const rot = Math.atan2(rtz, rtx), armL = Math.hypot(px - hx, pz - hz) + 0.4;
         Gm.cyl(px, 0, 0.6, pz, 0.24, 0.17, 12, METAL); Gm.cyl(px, 0.6, 6.35, pz, 0.15, 0.1, 12, METAL, true);
         Gm.tube([px, 6.0, pz], [hx - rtx * 0.45, 6.0, hz - rtz * 0.45], 0.085, 0.055, 9, METAL);
@@ -389,7 +406,7 @@ export function buildWorld(map, scene) {
           const hr = Math.atan2(l.oz, l.ox);
           Gm.box(x, y, z, 0.3, 1.15, 0.42, hr, DARK); Gm.box(x - l.ox * 0.16, y, z - l.oz * 0.16, 0.03, 1.4, 0.66, hr, YELLOW);      // 灯箱 + 黄边背板
           for (let k = 0; k < 3; k++) Gm.box(x + l.ox * 0.26, y + 0.36 - k * 0.36 + 0.155, z + l.oz * 0.26, 0.22, 0.025, 0.34, hr, DARK);   // 遮光檐
-          ['R', 'Y', 'G'].forEach((kind, k) => lampAt.push({ x: x + l.ox * 0.16, y: y + 0.36 - k * 0.36, z: z + l.oz * 0.16, fx: l.ox, fz: l.oz, j, group: l.group, kind }));
+          if (sidefx) ['R', 'Y', 'G'].forEach((kind, k) => lampAt.push({ x: x + l.ox * 0.16, y: y + 0.36 - k * 0.36, z: z + l.oz * 0.16, fx: l.ox, fz: l.oz, j, group: l.group, kind }));
         };
         head(hx, 5.35, hz); head(px + l.ox * 0.25 - rtx * 0.3, 3.3, pz + l.oz * 0.25 - rtz * 0.3);
         if (banSigns.length) { const sx = hx - rtx * 1.0, sz = hz - rtz * 1.0; board(Gs, sx + l.ox * 0.05, 5.35, sz + l.oz * 0.05, l.ox, l.oz, 0.95, 0.95, atlas.uv(banSigns[0])); backing(sx, 5.35, sz, l.ox, l.oz, 0.8, 0.86); }      // 横臂上灯头左边
@@ -425,17 +442,14 @@ export function buildWorld(map, scene) {
   }
   // 限速牌
   const P = {};
-  for (const s of map.segs) {
+  for (const s of segs) {
     if (s.useLen < 90 || s.high || ![20, 25, 35].includes(s.speed)) continue;
     const put = (sAt, sg) => { pointAt(s, sAt, P); const x = P.x - P.dz * (s.halfW + 0.9) * sg, z = P.z + P.dx * (s.halfW + 0.9) * sg; post(x, z, 2.7); board(Gs, x, 2.25, z, -P.dx * sg, -P.dz * sg, 0.85, 0.85, atlas.uv('speed' + s.speed)); backing(x, 2.25, z, -P.dx * sg, -P.dz * sg, 0.6, 0.76); };
     put(s.trimA + 30, 1); if (s.lb > 0) put(s.len - s.trimB - 30, -1);
   }
-  const texSign = new THREE.CanvasTexture(atlas.canvas); texSign.colorSpace = THREE.SRGBColorSpace; texSign.anisotropy = 8;
-  const texName = new THREE.CanvasTexture(nameAtlas.canvas); texName.colorSpace = THREE.SRGBColorSpace; texName.anisotropy = 8;
-  raised.add(add(Gs.build(), new THREE.MeshBasicMaterial({ map: texSign, alphaTest: 0.5, side: THREE.FrontSide })));
-  raised.add(add(Gn.build(), new THREE.MeshBasicMaterial({ map: texName, side: THREE.FrontSide })));
-  add(Ga.build(), new THREE.MeshBasicMaterial({ map: texSign, alphaTest: 0.5, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -8);
-  raised.add(add(Gm.build(), toonMat({ vertexColors: true, side: DS, smooth: true }), 0, true));
+  });
+  // 开局：对整张图空跑一遍标志这一遍（几何全丢掉），只为了登记占位和灯泡位置
+  { const dry = {}; for (const k in LAYERS) dry[k] = new CellGeo(SZ, null, null); sidefx = true; passes[passes.length - 1](dry, map.segs, map.juncs, []); sidefx = false; }
 
   // 灯泡：一个 InstancedMesh，按相位改颜色
   const lampMesh = new THREE.InstancedMesh(new THREE.CircleGeometry(0.135, 14), new THREE.MeshBasicMaterial({ side: DS, fog: false }), lampAt.length);
@@ -455,6 +469,7 @@ export function buildWorld(map, scene) {
     if (dirty && lampMesh.instanceColor) lampMesh.instanceColor.needsUpdate = true;
   };
 
+  const P = {};      // 下面摆路灯、树时共用的临时点
   // ---------- 分块 + 远近两套模型 ----------
   const CELLSZ = 120; world.lod = [];
   for (const L of buildLandmarks(map, raised, occupy)) world.lod.push({ x: L.x, z: L.z, hi: [], lo: [], near: null, gone: null, r: 0, far: L.far, g: L.g });      // 地标
@@ -469,13 +484,53 @@ export function buildWorld(map, scene) {
     const g = new THREE.Group(), all = [...hi, ...lo]; if (all.length) { all[0].parent.add(g); for (const m of all) g.add(m); }
     world.lod.push({ x: x / list.length, z: z / list.length, hi, lo, near: null, gone: null, r, far, g });
   };
+
+  // ---------- 按块现做：块的索引、生成、扔掉 ----------
+  // 每块记下跟它沾边的路段 / 路口 / 公园（包围盒外扩一圈：标志、红绿灯横臂、路缘都在路边几十米内）。
+  // 车离块中心 1500 米内排队生成（每帧只跑一个 pass，不卡），900 米内显示（和以前一样），2100 米外整块扔掉。
+  const cells = new Map(), cellOf = (i, k) => { const key = i * 100003 + k; let c = cells.get(key); if (!c) cells.set(key, c = { i, k, x: (i + 0.5) * SZ, z: (k + 0.5) * SZ, segs: [], juncs: [], parks: [], state: 0, step: 0, L: null, meshes: [], on: false }); return c; };
+  const enlist = (x0, z0, x1, z1, m, f) => { for (let i = Math.floor((x0 - m) / SZ); i <= Math.floor((x1 + m) / SZ); i++) for (let k = Math.floor((z0 - m) / SZ); k <= Math.floor((z1 + m) / SZ); k++) f(cellOf(i, k)); };
+  for (const sg of map.segs) { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (let i = 0; i < sg.n; i++) { x0 = Math.min(x0, sg.px[i]); x1 = Math.max(x1, sg.px[i]); z0 = Math.min(z0, sg.pz[i]); z1 = Math.max(z1, sg.pz[i]); } enlist(x0, z0, x1, z1, 30, c => c.segs.push(sg)); }
+  for (const j of map.juncs) { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (const q of j.poly) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); z0 = Math.min(z0, q[1]); z1 = Math.max(z1, q[1]); } enlist(x0, z0, x1, z1, 60, c => c.juncs.push(j)); }
+  for (const pts of parkPolys) { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (const q of pts) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); z0 = Math.min(z0, q.y); z1 = Math.max(z1, q.y); } enlist(x0, z0, x1, z1, 0, c => c.parks.push(pts)); }
+  const cellList = [...cells.values()], passTime = [], passMax = []; world.cells = cellList; world.passTime = () => ({ sum: passTime.map(v => +v.toFixed(0)), max: passMax.map(v => +v.toFixed(1)) });
+  /** 给这一块往前做一步（跑一个 pass）；所有 pass 跑完就把各层建成网格挂上去 */
+  const cellStep = (c) => {
+    // 一步 = 一个 pass 跑一小批（80 段路 + 40 个路口），一帧最多几毫秒，开车时不顿
+    if (c.state === 0) { c.L = {}; for (const k in LAYERS) c.L[k] = new CellGeo(SZ, c.i, c.k); c.state = 1; c.step = 0; c.nSl = Math.max(1, Math.ceil(c.segs.length / 80), Math.ceil(c.juncs.length / 40)); }
+    const pi = Math.floor(c.step / c.nSl), k = c.step % c.nSl, t0 = performance.now();
+    passes[pi](c.L, c.segs.slice(k * 80, k * 80 + 80), c.juncs.slice(k * 40, k * 40 + 40), k ? [] : c.parks);
+    passTime[pi] = (passTime[pi] || 0) + performance.now() - t0; passMax[pi] = Math.max(passMax[pi] || 0, performance.now() - t0); c.step++;
+    if (c.step < passes.length * c.nSl) return;
+    for (const [k, G] of Object.entries(c.L)) {
+      if (!G.i.length) continue;
+      const Ly = LAYERS[k], m = new THREE.Mesh(G.build(), Ly.mat); m.renderOrder = Ly.order; m.matrixAutoUpdate = false; m.receiveShadow = true; m.castShadow = Ly.cast; m.visible = c.on;
+      (Ly.up ? raised : world.group).add(m); if (Ly.up) m.updateMatrixWorld(true); c.meshes.push(m);
+    }
+    c.L = null; c.state = 2;
+  };
+  const cellDrop = (c) => { for (const m of c.meshes) { m.parent.remove(m); m.geometry.dispose(); } c.meshes = []; c.L = null; c.state = 0; c.step = 0; };
+  const BUILD_R = 1500, SHOW_R = 900, DROP_R = 2100;
+  /** sync：把显示半径内还没做好的块当场做完（开局、瞬移、调试镜头） */
+  const streamCells = (x, z, sync) => {
+    let best = null, bd = 1e9;
+    for (const c of cellList) {
+      const d = Math.hypot(c.x - x, c.z - z);
+      if (d > DROP_R) { if (c.state) cellDrop(c); continue; }
+      if (sync && d < SHOW_R) while (c.state !== 2) cellStep(c);
+      if (c.state !== 2 && d < BUILD_R && d < bd) { bd = d; best = c; }
+      const on = d < (c.on ? SHOW_R : SHOW_R - 40); if (on !== c.on) { c.on = on; for (const m of c.meshes) m.visible = on; }
+    }
+    return best;
+  };
   let first = true;
-  /** 每帧调：按距离分块加载 / 卸载建筑 */
-  world.stream = (x, z) => bld.ensure(x, z, 3);
+  /** 每帧调：按距离分块加载 / 卸载建筑；路面这些按块现做的，每帧往前做一步 */
+  world.stream = (x, z) => { bld.ensure(x, z, 3); const c = streamCells(x, z, false); if (c) cellStep(c); };
   /** 车被搬到了很远的地方（换出发点、开课）：下一帧把周围的楼一次建齐，不然要等十几秒楼才慢慢长出来 */
   world.jump = () => { first = true; };
   world.updateLod = (x, z) => {
     if (first) { bld.ensure(x, z, 1e9); first = false; }
+    streamCells(x, z, true);
     for (const c of chunks) { const on = Math.hypot(c.x - x, c.z - z) < (c.on ? 900 : 860); if (on !== c.on) { c.on = on; c.m.visible = on; } }
     for (const c of world.lod) {
       const d = Math.hypot(c.x - x, c.z - z), near = d < (c.near ? c.r + 20 : c.r), gone = d > (c.gone ? c.far - 30 : c.far);
@@ -501,7 +556,7 @@ export function buildWorld(map, scene) {
 
   // ---------- 路灯、消防栓 ----------
   {
-    const lamps = [], hyd = [];
+    const lamps = [], hyd = [], P = {};
     for (const s of map.segs) {
       if (s.useLen < 50 || s.high) continue;
       for (let u = s.trimA + 15, k = 0; u < s.len - s.trimB - 10; u += 42, k++) {
@@ -567,6 +622,6 @@ export function buildWorld(map, scene) {
 
   world.samples = bld.samples;
   world.updateLod(0, 0);
-  world.stats = () => ({ lamps: lampAt.length, parked: map.parked.length, buildings: map.raw.buildings.length, ...bld.stats() });
+  world.stats = () => ({ roadCellsBuilt: cellList.filter(c => c.state === 2).length, roadCells: cellList.length, lamps: lampAt.length, parked: map.parked.length, buildings: map.raw.buildings.length, ...bld.stats() });
   return world;
 }

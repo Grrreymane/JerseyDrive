@@ -169,3 +169,16 @@ export class ChunkGeo extends Geo {
   build() { return [...this.cells.values()].map(g => ({ x: g.cx, z: g.cz, geo: g.build() })); }
 }
 export const lin = (hex) => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; };
+/**
+ * 只收落在某一块里的面（按第一个点算归属，和 ChunkGeo 一样），别的丢掉。按块现做几何时用：
+ * 同一段路跨好几块，每块各跑一遍、各留自己那份，拼起来不重不漏。ci 为 null 时什么都不收（只为跑副作用）。
+ */
+export class CellGeo extends Geo {
+  constructor(size, ci, ck) { super(); this.size = size; this.ci = ci; this.ck = ck; }
+  has(x, z) { return this.ci !== null && Math.floor(x / this.size) === this.ci && Math.floor(z / this.size) === this.ck; }
+  /** (x, z) 离这一块不到 m 米（用来提前跳过明显不归这块的计算） */
+  near(x, z, m) { if (this.ci === null) return false; const x0 = this.ci * this.size, z0 = this.ck * this.size; return x > x0 - m && x < x0 + this.size + m && z > z0 - m && z < z0 + this.size + m; }
+  quad(...a) { if (this.has(a[0], a[2])) super.quad(...a); }
+  flat(...a) { if (this.has(a[0], a[1])) super.flat(...a); }
+  quadN(P, N, col, uv) { if (this.has(P[0][0], P[0][2])) super.quadN(P, N, col, uv); }
+}
