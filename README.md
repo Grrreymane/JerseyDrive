@@ -164,3 +164,12 @@ node tools/cdp.mjs "http://127.0.0.1:8765/?style=cel&fly&v=8&len=260&q=0" --vide
 - 禁止红灯右转（`data/ntor.json` + `sim/map.js` 的 `markNoTurnOnRed`）：只收有出处的——泽西城 Heights 的 Ord. 24-013（22 个进口）、Monticello Ave 三个路口、OSM 里的 1 处，按街名 + 行驶方向对到路口进口上（34 个进口、17 个路口；North St & Central Ave 地图上没有）。这些进口红绿灯横臂和灯杆上挂 NO TURN ON RED，红灯右转算闯红灯，教练提示会说这里能不能红灯右转。泽西城实际有 190 多处，市政法规全表的网站不让程序读。
 - 导航蓝线：走过的路段去掉，当前这段从车的位置画起，最后一段画到目的地为止。
 - 转向限制（`tools/fetch_turns.mjs` → `data/turns.json`，`sim/map.js` 的 `markTurnBans`）：OSM 的禁止左转 / 右转 / 直行 / 掉头、只准左转 / 右转 / 直行，按位置 + 进出方向对到路口进口上（556 条里对上 411 条，没对上的多是转进停车场、加油站这类地图里没有的小路）。路口前右手边挂牌（只剩一个方向能走时挂“只准 X”），有红绿灯的横臂上也挂；违反算 `turn_ban`；路口预告里标“✕ 禁止左转”；车流和导航都不走被禁的方向。
+
+### 第十三轮：往北扩到 Fort Lee
+
+- 地图由两块拼成（`tools/regions.json` 的 `all.extra = ['north']`）：原来的 Newark → JC，加上北边 Hoboken、Weehawken、Union City、West New York、North Bergen、Edgewater、Fort Lee（40.745–40.866°N）。两块共用原来的原点，旧坐标、经纬度都不变。路 1520 公里、楼 8.6 万栋（原来一半）。
+- 北边那块的矩形跨过哈德逊河：沿新泽西和纽约州界（`tools/raw/nj_ny_border.json`）切掉东边的路和楼，州界以东在水面栅格里一律当水，远处是曼哈顿天际线的布景。华盛顿桥整座保留（开到曼哈顿岸边才到头），加了两座钢塔、主缆和吊索（`landmarks.js`）；上下两层按 OSM 的 layer 分开 7 米。没有地形：Fort Lee 在悬崖顶上，桥面和那边的街一样高。
+- 拼起来的图不是矩形：地面只铺在两块范围外扩 400 米里，没洞的地方 192 米一块；水面栅格里两块都没盖到的格子从有数据的格子往外扩 300 米，再远的当陆地。
+- 出发点加了 Hoboken、Weehawken、Union City、West New York、Edgewater、Fort Lee。北边也下了激光雷达（同一个 USGS 新泽西数据集）、Overture 楼高、店名门牌、转向限制。
+- 内存：井盖和雨水篦子改成实例化（以前每个单独画，全图占两百多兆）；不贴图的层不存 uv。扩图后回收后 JS 堆约 660 MB（扩图前同样口径约 440 MB）。小地图按 300 米格子只画附近的路；红绿灯灯泡只在变色时改。跑分 190–220 帧（扩图前约 237）。
+- `tools/cdp.mjs` 加了 `--mem`（强制回收后看 JS 堆，分 V8 对象和 ArrayBuffer）、`--heapprof`（还活着的内存是哪几行分配的）、`--cpuprof`（eval 期间最占 CPU 的函数）。

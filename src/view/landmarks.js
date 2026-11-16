@@ -254,5 +254,46 @@ export function buildLandmarks(map, parent, occupy) {
       }
     }
   }
+
+  // ---------- 华盛顿桥（Fort Lee）：两座钢塔、主缆、吊索。桥面是地图里的路（上层 14.5 米、下层 7.5 米）。
+  // 没做地形：Fort Lee 在悬崖顶上，真实桥面和那边的街一样高，所以这里桥面也贴着街的高度；塔从水面算起 125 米 ----------
+  {
+    const up = map.segs.filter(s => s.high && /^George Washington Bridge Upper/.test(s.name || '')), pts = [];
+    for (const s of up) for (let i = 0; i < s.n; i++) if (segY(s, s.cum[i]) > 12) pts.push([s.px[i], s.pz[i]]);
+    if (pts.length > 10) {
+      const mx = pts.reduce((a, p) => a + p[0], 0) / pts.length, mz = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+      let sxx = 0, szz = 0, sxz = 0; for (const [x, z] of pts) { sxx += (x - mx) ** 2; szz += (z - mz) ** 2; sxz += (x - mx) * (z - mz); }
+      const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz); let dx = Math.cos(ang), dz = Math.sin(ang); if (dx < 0) { dx = -dx; dz = -dz; }      // 桥轴，朝东
+      const T = pts.map(([x, z]) => (x - mx) * dx + (z - mz) * dz), L = pts.map(([x, z]) => -(x - mx) * dz + (z - mz) * dx);
+      const t0 = Math.min(...T), lc = (Math.min(...L) + Math.max(...L)) / 2, hw = (Math.max(...L) - Math.min(...L)) / 2 + 8;
+      const Pt = (t, l) => [mx + dx * t - dz * l, mz + dz * t + dx * l];
+      let tShore = null; for (let t = t0; t < t0 + 1500; t += 5) { const [x, z] = Pt(t, lc); if (isWater(x, z)) { tShore = t; break; } }
+      if (tShore !== null) {
+        const G = new Geo(), STEEL = lin('#9ea6ad'), DARK = lin('#7f878e'), CABLE = lin('#6c747b'), rot = Math.atan2(dz, dx), TOP = 125, DECK = 14.5;
+        const tNJ = tShore + 20, tNY = tNJ + 1067, tAnj = Math.max(t0, tNJ - 190), tAny = tNY + 185;
+        for (const tt of [tNJ, tNY]) {      // 塔：两条腿 + 几道横梁 + 交叉斜撑（钢架的样子）
+          const leg = (sg) => Pt(tt, lc + sg * hw);
+          for (const sg of [-1, 1]) { const [x, z] = leg(sg); G.box(x, TOP / 2, z, 9, TOP, 7.5, rot, STEEL, DARK); }
+          const beams = [4, 34, 62, 90, 118];
+          for (const y of beams) { const [x, z] = Pt(tt, lc); G.box(x, y, z, 6, y === 118 ? 7 : 3.5, hw * 2, rot, STEEL, DARK); }
+          for (let k = 1; k < beams.length - 1; k++) {
+            const y0 = beams[k] + 2, y1 = beams[k + 1] - 2, [ax, az] = leg(-1), [bx, bz] = leg(1);
+            G.tube([ax, y0, az], [bx, y1, bz], 0.9, 0.9, 4, DARK); G.tube([bx, y0, bz], [ax, y1, az], 0.9, 0.9, 4, DARK);
+          }
+          for (let y = 8; y < TOP - 4; y += 10) for (const sg of [-1, 1]) { const [x, z] = leg(sg); G.box(x - dz * sg * 3.9, y, z + dx * sg * 3.9, 9.2, 0.6, 0.2, rot, DARK); }      // 腿外侧的横向钢条
+        }
+        // 主缆（每边一根粗的）：锚碇 → 塔顶 → 中间垂到桥面上方 → 另一座塔顶 → 锚碇
+        const yAt = (t) => t <= tNJ ? 18 + (TOP - 18) * (t - tAnj) / (tNJ - tAnj) : t >= tNY ? TOP - (TOP - 18) * (t - tNY) / (tAny - tNY) : DECK + 5 + (TOP - DECK - 5) * ((2 * (t - tNJ) / (tNY - tNJ) - 1) ** 2);
+        for (const sg of [-1, 1]) {
+          const l = lc + sg * (hw - 2); let prev = null;
+          for (let t = tAnj; t <= tAny + 0.1; t += (t < tNJ || t > tNY) ? 19 : 26.7) {
+            const [x, z] = Pt(t, l), p = [x, yAt(t), z]; if (prev) G.tube(prev, p, 0.75, 0.75, 6, CABLE); prev = p;
+            if (t > tNJ + 5 && t < tNY - 5) G.tube([x, DECK + 0.5, z], [x, p[1], z], 0.09, 0.09, 3, CABLE);      // 吊索
+          }
+        }
+        const [cx, cz] = Pt((tNJ + tNY) / 2, lc); finish(cx, cz, 9000, G);
+      }
+    }
+  }
   return out;
 }

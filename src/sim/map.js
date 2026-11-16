@@ -340,7 +340,7 @@ export function markNoTurnOnRed(map, rows) {
 export function markTurnBans(map, rows) {
   const o = map.origin; let ok = 0, miss = 0;
   for (const r of rows) {
-    if (r.k === 'no_right_turn_on_red') { miss++; continue; }      // 这个由 data/ntor.json 管
+    if (r.k === 'no_right_turn_on_red' || r.k.includes('@')) { miss++; continue; }      // 红灯右转由 data/ntor.json 管；带时段的（上学时间禁止右转）先不管
     const x = (r.at[1] - o.lon) * o.kx, z = -(r.at[0] - o.lat) * o.kz;
     let j = null, bd = 18; for (const k of map.juncs) { const d = Math.hypot(k.cx - x, k.cz - z) - k.r; if (d < bd) { bd = d; j = k; } }
     if (!j || j.control === 'joint') { miss++; continue; }

@@ -87,10 +87,20 @@ export function buildWorld(map, scene) {
       for (let u = 0; u <= s.len; u += 2) { const y = segY(s, u); if (y > -0.02 || y < -5.6) continue; pointAt(s, u, P); for (let o = -s.halfW - 1.2; o <= s.halfW + 1.2; o += 2) holes.add(Math.floor((P.x - P.dz * o) / F) + ',' + Math.floor((P.z + P.dx * o) / F)); }
     }
     const big = new Set(); for (const k of holes) { const [a, b] = k.split(',').map(Number); big.add(Math.floor(a / N) + ',' + Math.floor(b / N)); }
-    const S = F * N, nx = Math.ceil(X / S), nz = Math.ceil(Z / S);
-    for (let i = -nx; i < nx; i++) for (let k = -nz; k < nz; k++) {
-      if (!big.has(i + ',' + k)) { G.flat(i * S, k * S, i * S, (k + 1) * S, (i + 1) * S, (k + 1) * S, (i + 1) * S, k * S, CH, [1, 1, 1], 1 / 6); continue; }
+    // 拼起来的图（map.raw.rects 有好几块）只在各块范围外扩 400 米里铺；没有洞的地方 4×4 个大格并成一块 192 米的，三角形少很多
+    const S = F * N, T = 4, rects = map.raw.rects || [[-X + 400, -Z + 400, X - 400, Z - 400]];
+    const want = (i, k) => rects.some(r => (i + 1) * S > r[0] - 400 && i * S < r[2] + 400 && (k + 1) * S > r[1] - 400 && k * S < r[3] + 400);
+    const i0 = Math.floor(Math.min(...rects.map(r => r[0] - 400)) / S / T) * T, i1 = Math.ceil(Math.max(...rects.map(r => r[2] + 400)) / S / T) * T;
+    const k0 = Math.floor(Math.min(...rects.map(r => r[1] - 400)) / S / T) * T, k1 = Math.ceil(Math.max(...rects.map(r => r[3] + 400)) / S / T) * T;
+    const cellQuad = (i, k) => {
+      if (!big.has(i + ',' + k)) { G.flat(i * S, k * S, i * S, (k + 1) * S, (i + 1) * S, (k + 1) * S, (i + 1) * S, k * S, CH, [1, 1, 1], 1 / 6); return; }
       for (let a = i * N; a < (i + 1) * N; a++) for (let b = k * N; b < (k + 1) * N; b++) if (!holes.has(a + ',' + b)) G.flat(a * F, b * F, a * F, (b + 1) * F, (a + 1) * F, (b + 1) * F, (a + 1) * F, b * F, CH, [1, 1, 1], 1 / 6);
+    };
+    for (let I = i0; I < i1; I += T) for (let K = k0; K < k1; K += T) {
+      let all = true, any = false; for (let i = I; i < I + T; i++) for (let k = K; k < K + T; k++) { const w = want(i, k); any ||= w; if (!w || big.has(i + ',' + k)) all = false; }
+      if (!any) continue;
+      if (all) { G.flat(I * S, K * S, I * S, (K + T) * S, (I + T) * S, (K + T) * S, (I + T) * S, K * S, CH, [1, 1, 1], 1 / 6); continue; }
+      for (let i = I; i < I + T; i++) for (let k = K; k < K + T; k++) if (want(i, k)) cellQuad(i, k);
     }
     // 地面各层共面，靠 renderOrder 叠：人行道和路面写深度（后处理的接触阴影要读），深度比较一律通过，后画的盖先画的
     add(G.build(), toonMat({ map: texConcrete, side: DS, depthFunc: THREE.AlwaysDepth }), -30);
@@ -210,25 +220,35 @@ export function buildWorld(map, scene) {
   add(Gc.build(), toonMat({ vertexColors: true }));
   // 路边的排水沟（一条浅色混凝土带）、雨水篦子、井盖 —— 都是贴在路面上的薄片
   {
-    const Gg = new ChunkGeo(), Gd = new ChunkGeo(), GUT = lin('#9a9c9f'), IRON = [0.07, 0.07, 0.08], IRON_L = [0.2, 0.2, 0.22], P = {};
+    const Gg = new ChunkGeo(), holesM = [], grates = [], GUT = lin('#9a9c9f'), IRON = [0.07, 0.07, 0.08], IRON_L = [0.2, 0.2, 0.22], P = {};
     for (const s of map.segs) {
       if (s.useLen < 2 || s.high) continue; const s0 = s.trimA, s1 = s.len - s.trimB;
       strip(Gg, s, s0, s1, s.halfW - 0.34, s.halfW, 0, GUT); strip(Gg, s, s0, s1, -s.halfW, -s.halfW + 0.34, 0, GUT);
       if (s.useLen < 30) continue;
       for (const sg of [-1, 1]) for (const sa of [s0 + XWALK_FAR + 2.2, s1 - XWALK_FAR - 3.2]) {       // 路口前后各一个雨水篦子
-        const o0 = sg * (s.halfW - 0.5), o1 = sg * (s.halfW - 0.04); strip(Gd, s, sa, sa + 0.95, Math.min(o0, o1), Math.max(o0, o1), 0, IRON);
-        for (let k = 0; k < 5; k++) strip(Gd, s, sa + 0.09 + k * 0.17, sa + 0.16 + k * 0.17, Math.min(o0, o1) + 0.05, Math.max(o0, o1) - 0.05, 0, IRON_L);
+        offsetPoint(s, sa + 0.475, sg * (s.halfW - 0.27), P); grates.push([P.x, P.z, Math.atan2(P.dz, P.dx)]);
       }
       for (const f of s.useLen > 130 ? [0.3, 0.68] : s.useLen > 55 ? [0.42] : []) {                      // 井盖
-        offsetPoint(s, s0 + s.useLen * f, s.cOff + (s.lf > 0 ? 1 : -1) * LANE_W * 0.5 + (hash(s.id * 3 + f * 10) - 0.5) * 1.2, P);
-        const N = 16, ring = (r) => { const a = []; for (let k = 0; k < N; k++) { const t = k / N * Math.PI * 2; a.push([P.x + Math.cos(t) * r, P.z + Math.sin(t) * r]); } return a; };
-        const fan = (r, col) => { const a = ring(r); for (let k = 0; k < N; k++) { const q = a[(k + 1) % N]; Gd.flat(P.x, P.z, a[k][0], a[k][1], q[0], q[1], q[0], q[1], 0, col); } };
-        fan(0.44, GUT); fan(0.38, IRON); fan(0.3, IRON_L); fan(0.26, IRON); fan(0.07, IRON_L);
-        for (let k = 0; k < 6; k++) { const t = k / 6 * Math.PI * 2, c = Math.cos(t), sn = Math.sin(t); Gd.flat(P.x + c * 0.1 - sn * 0.02, P.z + sn * 0.1 + c * 0.02, P.x + c * 0.24 - sn * 0.02, P.z + sn * 0.24 + c * 0.02, P.x + c * 0.24 + sn * 0.02, P.z + sn * 0.24 - c * 0.02, P.x + c * 0.1 + sn * 0.02, P.z + sn * 0.1 - c * 0.02, 0, IRON_L); }
+        offsetPoint(s, s0 + s.useLen * f, s.cOff + (s.lf > 0 ? 1 : -1) * LANE_W * 0.5 + (hash(s.id * 3 + f * 10) - 0.5) * 1.2, P); holesM.push([P.x, P.z, hash(s.id * 7 + f) * 6.28]);
       }
     }
     add(Gg.build(), toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -15);
-    add(Gd.build(), toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -9);
+    // 井盖和雨水篦子：一个模型，按位置摆（实例化）。以前每个都单独画一遍，全图几万个，光它们就占两百多兆内存
+    const one = new Geo(), N = 16, fan = (r, col) => { for (let k = 0; k < N; k++) { const t0 = k / N * Math.PI * 2, t1 = (k + 1) / N * Math.PI * 2; one.flat(0, 0, Math.cos(t0) * r, Math.sin(t0) * r, Math.cos(t1) * r, Math.sin(t1) * r, Math.cos(t1) * r, Math.sin(t1) * r, 0, col); } };
+    fan(0.44, GUT); fan(0.38, IRON); fan(0.3, IRON_L); fan(0.26, IRON); fan(0.07, IRON_L);
+    for (let k = 0; k < 6; k++) { const t = k / 6 * Math.PI * 2, c = Math.cos(t), sn = Math.sin(t); one.flat(c * 0.1 - sn * 0.02, sn * 0.1 + c * 0.02, c * 0.24 - sn * 0.02, sn * 0.24 + c * 0.02, c * 0.24 + sn * 0.02, sn * 0.24 - c * 0.02, c * 0.1 + sn * 0.02, sn * 0.1 - c * 0.02, 0, IRON_L); }
+    const gr = new Geo(); gr.flat(-0.475, -0.23, -0.475, 0.23, 0.475, 0.23, 0.475, -0.23, 0, IRON);
+    for (let k = 0; k < 5; k++) { const x = -0.385 + k * 0.17; gr.flat(x, -0.18, x, 0.18, x + 0.07, 0.18, x + 0.07, -0.18, 0, IRON_L); }
+    const dMat = toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth });
+    for (const [list, geo] of [[holesM, one.build()], [grates, gr.build()]]) {
+      const cells = new Map(); for (const it of list) { const k = Math.floor(it[0] / 1200) + ',' + Math.floor(it[1] / 1200); if (!cells.has(k)) cells.set(k, []); cells.get(k).push(it); }
+      const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S1 = new THREE.Vector3(1, 1, 1), UP = new THREE.Vector3(0, 1, 0);
+      for (const [k, its] of cells) {
+        const m = new THREE.InstancedMesh(geo, dMat, its.length); m.renderOrder = -9; m.receiveShadow = true; m.matrixAutoUpdate = false;
+        its.forEach(([x, z, a], i) => { Q.setFromAxisAngle(UP, -a); M.compose(V.set(x, 0, z), Q, S1); m.setMatrixAt(i, M); });
+        m.computeBoundingSphere(); world.group.add(m); const [cx, cz] = k.split(',').map(Number); chunks.push({ x: (cx + 0.5) * 1200, z: (cz + 0.5) * 1200, m, on: true });
+      }
+    }
   }
   add(Gtac.build(), toonMat({ vertexColors: true, side: DS, depthWrite: false, depthFunc: THREE.AlwaysDepth }), -9);
 
@@ -424,9 +444,15 @@ export function buildWorld(map, scene) {
   lampMesh.frustumCulled = false; raised.add(lampMesh); world.lampMesh = lampMesh; world.lamps = lampAt;
   const ON = { R: new THREE.Color(1, 0.08, 0.06), Y: new THREE.Color(1, 0.72, 0.05), G: new THREE.Color(0.1, 1, 0.45) };
   const OFF = { R: new THREE.Color(0.16, 0.02, 0.02), Y: new THREE.Color(0.15, 0.11, 0.02), G: new THREE.Color(0.02, 0.13, 0.07) };
+  // 每帧：每个路口每组灯只算一次状态；灯泡颜色只在变了的时候改（全图两万多个灯泡，每帧全改一遍很费）
+  const lampOn = new Int8Array(lampAt.length).fill(-1), stCache = new Map();
   world.updateSignals = (t) => {
-    for (let i = 0; i < lampAt.length; i++) { const a = lampAt[i]; lampMesh.setColorAt(i, signalState(a.j, a.group, t) === a.kind ? ON[a.kind] : OFF[a.kind]); }
-    if (lampMesh.instanceColor) lampMesh.instanceColor.needsUpdate = true;
+    stCache.clear(); let dirty = false;
+    for (let i = 0; i < lampAt.length; i++) {
+      const a = lampAt[i], key = a.j.id * 8 + a.group; let st = stCache.get(key); if (st === undefined) { st = signalState(a.j, a.group, t); stCache.set(key, st); }
+      const on = st === a.kind ? 1 : 0; if (on !== lampOn[i]) { lampOn[i] = on; lampMesh.setColorAt(i, on ? ON[a.kind] : OFF[a.kind]); dirty = true; }
+    }
+    if (dirty && lampMesh.instanceColor) lampMesh.instanceColor.needsUpdate = true;
   };
 
   // ---------- 分块 + 远近两套模型 ----------

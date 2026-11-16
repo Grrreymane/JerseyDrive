@@ -45,6 +45,30 @@
       -74.03
     ],
     "raw": "osm_all.json",
-    "out": "map_all.json"
+    "out": "map_all.json",
+    "origin": [
+      40.729,
+      -74.11099999999999
+    ],
+    "extra": [
+      "north"
+    ]
+  },
+  "north": {
+    "name": "Hoboken 到 Fort Lee",
+    "en": "Hoboken to Fort Lee",
+    "bbox": [
+      40.745,
+      -74.045,
+      40.866,
+      -73.945
+    ],
+    "raw": "osm_north.json",
+    "out": "map_all.json",
+    "origin": [
+      40.729,
+      -74.11099999999999
+    ],
+    "clip": "nj_ny_border.json"
   }
 }

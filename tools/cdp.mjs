@@ -1,6 +1,7 @@
 // 用真 Chrome（无头 + 显卡）打开页面：等页面就绪 → 截图 / 取数 / 录像。
 // node tools/cdp.mjs <url> [--size 1600x900] [--wait <js 表达式，为真才继续>] [--settle 1500]
-//                    [--shot out.png] [--eval <js 表达式，打印结果>] [--video out.webm --secs 20] [--nolimit]
+//                    [--shot out.png] [--eval <js 表达式，打印结果>] [--video out.webm --secs 20] [--nolimit] [--mem]
+// --mem 先强制回收垃圾，再打印 JS 堆大小（看内存占用）；--heapprof 打印还活着的内存是哪几行代码分配的；--cpuprof 打印 eval 期间最占 CPU 的函数
 // --nolimit 关掉垂直同步，跑分时用（否则帧率被锁在 60）。
 import { spawn } from 'node:child_process';
 import { writeFileSync, mkdtempSync } from 'node:fs';
@@ -8,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const argv = process.argv.slice(2), url = argv[0], opt = {};
-for (let i = 1; i < argv.length; i++) { const k = argv[i].replace(/^--/, ''); if (k === 'nolimit') opt[k] = true; else opt[k] = argv[++i]; }
+for (let i = 1; i < argv.length; i++) { const k = argv[i].replace(/^--/, ''); if (['nolimit', 'mem', 'heapprof', 'cpuprof'].includes(k)) opt[k] = true; else opt[k] = argv[++i]; }
 const [w, h] = (opt.size || '1600x900').split('x').map(Number);
 const chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const port = 9300 + Math.floor(Math.random() * 500), prof = mkdtempSync(join(tmpdir(), 'cdp-'));
@@ -32,6 +33,7 @@ const done = (code) => { for (const l of logs.slice(0, 12)) console.log(l); p.ki
 
 await send('Runtime.enable');
 await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+if (opt.heapprof) { await send('HeapProfiler.enable'); await send('HeapProfiler.startSampling', { samplingInterval: 65536 }); }
 await send('Page.navigate', { url });
 const waitFor = opt.wait || 'window.__jd && window.__jd.ready';
 let ok = false;
@@ -47,6 +49,19 @@ if (opt.video) {
   })`);
   writeFileSync(opt.video, Buffer.from(b64, 'base64')); console.log('saved', opt.video);
 }
+if (opt.heapprof) {      // 还活着的内存是在哪几行代码分配的（前 25）
+  await send('HeapProfiler.collectGarbage'); const r = await send('HeapProfiler.getSamplingProfile'), agg = new Map();
+  const walk = (n, stack) => { const f = n.callFrame, here = `${f.functionName || '(匿名)'} ${f.url.split('/').pop()}:${f.lineNumber + 1}`; if (n.selfSize) agg.set(here, (agg.get(here) || 0) + n.selfSize); for (const c of n.children) walk(c, stack); };
+  walk(r.result.profile.head, []); [...agg].sort((a, b) => b[1] - a[1]).slice(0, 25).forEach(([k, v]) => console.log((v / 1e6).toFixed(1).padStart(7), 'MB ', k));
+}
+if (opt.cpuprof) { await send('Profiler.enable'); await send('Profiler.setSamplingInterval', { interval: 200 }); await send('Profiler.start'); }
 if (opt.eval) console.log(JSON.stringify(await ev(opt.eval)));
+if (opt.cpuprof) {      // eval 期间哪些函数最占 CPU（自身时间，前 20）
+  const { result: { profile: P } } = await send('Profiler.stop'), self = new Map(), byId = new Map(P.nodes.map(n => [n.id, n])), dt = new Map();
+  for (let i = 0; i < P.samples.length; i++) dt.set(P.samples[i], (dt.get(P.samples[i]) || 0) + (P.timeDeltas[i] || 0));
+  let tot = 0; for (const [id, t] of dt) { const f = byId.get(id).callFrame, k = `${f.functionName || '(匿名)'} ${f.url.split('/').pop()}:${f.lineNumber + 1}`; self.set(k, (self.get(k) || 0) + t); tot += t; }
+  [...self].sort((a, b) => b[1] - a[1]).slice(0, 20).forEach(([k, v]) => console.log((v / tot * 100).toFixed(1).padStart(5), '% ', k));
+}
+if (opt.mem) { await send('HeapProfiler.enable'); await send('HeapProfiler.collectGarbage'); const m = await ev('performance.memory.usedJSHeapSize'); const u = (await send('Runtime.getHeapUsage')).result; console.log('JS 堆（回收后）', (m / 1e6).toFixed(0), 'MB；其中 V8 对象', (u.usedSize / 1e6).toFixed(0), 'MB，ArrayBuffer 等', ((u.backingStorageSize || 0) / 1e6).toFixed(0), 'MB'); }
 if (opt.shot) { const r = await send('Page.captureScreenshot', { format: 'png' }); writeFileSync(opt.shot, Buffer.from(r.result.data, 'base64')); console.log('saved', opt.shot); }
 done(0);

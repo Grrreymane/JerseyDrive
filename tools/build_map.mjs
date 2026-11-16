@@ -8,21 +8,33 @@ import { fileURLToPath } from 'url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // 区域：node tools/build_map.mjs [downtown|jsq|newark]，表在 tools/regions.json
-const REGION = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/regions.json'), 'utf8'))[process.argv[2] || 'downtown'];
-const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/raw', REGION.raw), 'utf8'));
+const RID = process.argv[2] || 'downtown', REGIONS = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/regions.json'), 'utf8')), REGION = REGIONS[RID];
+// 一张图可以由几块拼成（REGION.extra 里列的区域，比如北边 Hoboken → Fort Lee 那块）：各块的原始数据合在一起，坐标共用一个原点
+const PARTS = [RID, ...(REGION.extra || [])].map(id => ({ id, ...REGIONS[id] }));
+const raw = { elements: PARTS.flatMap(P => JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/raw', P.raw), 'utf8')).elements) };
 const OUT = path.join(ROOT, 'data', REGION.out);
 
 const BBOX = { s: REGION.bbox[0], w: REGION.bbox[1], n: REGION.bbox[2], e: REGION.bbox[3] };
-const LAT0 = (BBOX.s + BBOX.n) / 2, LON0 = (BBOX.w + BBOX.e) / 2;
+const [LAT0, LON0] = REGION.origin || [(BBOX.s + BBOX.n) / 2, (BBOX.w + BBOX.e) / 2];
 const KX = 111320 * Math.cos(LAT0 * Math.PI / 180), KZ = 110574;
 const proj = (lat, lon) => [(lon - LON0) * KX, -(lat - LAT0) * KZ];
-const HX = (BBOX.e - LON0) * KX, HZ = (BBOX.n - LAT0) * KZ;   // 半宽、半高（米）
 const MARGIN = 30;
-const inBounds = (p) => Math.abs(p[0]) <= HX + MARGIN && Math.abs(p[1]) <= HZ + MARGIN;
+// 每块的范围（本地米）；clip：沿这条线（新泽西和纽约州界，在哈德逊河中间）切掉东边的，北边那块的矩形会带进曼哈顿
+const RECTS = PARTS.map(P => {
+  const [s, w, n, e] = P.bbox, a = proj(n, w), b = proj(s, e), r = { x0: a[0], z0: a[1], x1: b[0], z1: b[1] };
+  if (P.clip) { const L = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/raw', P.clip), 'utf8')).map(([lat, lon]) => proj(lat, lon)).sort((p, q) => p[1] - q[1]); r.clipX = (z) => { let i = 1; while (i < L.length - 1 && L[i][1] < z) i++; const p = L[i - 1], q = L[i], t = Math.max(0, Math.min(1, (z - p[1]) / ((q[1] - p[1]) || 1))); return p[0] + (q[0] - p[0]) * t; }; }
+  return r;
+});
+const inRect = (p, m = MARGIN, noClip = false) => RECTS.some(r => p[0] >= r.x0 - m && p[0] <= r.x1 + m && p[1] >= r.z0 - m && p[1] <= r.z1 + m && (noClip || !r.clipX || p[0] <= r.clipX(p[1]) + m));
+const inBounds = (p) => inRect(p);
+const BX0 = Math.min(...RECTS.map(r => r.x0)), BX1 = Math.max(...RECTS.map(r => r.x1)), BZ0 = Math.min(...RECTS.map(r => r.z0)), BZ1 = Math.max(...RECTS.map(r => r.z1));
+const HX = Math.max(-BX0, BX1), HZ = Math.max(-BZ0, BZ1);      // 兼容旧字段：以原点为中心能包住整张图的半宽、半高
 
 const nodes = new Map();
 const ways = [];
+const seenWay = new Set();
 for (const e of raw.elements) {
+  if (e.type === 'way') { if (seenWay.has(e.id)) continue; seenWay.add(e.id); }      // 几块重叠的地方同一条路会出现两次
   if (e.type === 'node') { if (!nodes.has(e.id) || e.tags) nodes.set(e.id, { id: e.id, p: proj(e.lat, e.lon), tags: e.tags || {} }); }   // 同一个节点会出现两次，第二次不带标签
   else if (e.type === 'way') ways.push(e);
 }
@@ -68,12 +80,13 @@ for (const w of ways) {
   const a = attrs(t);
   // free：高速 / 快速路一家的路（含匝道），高度可以调（路堤、桥、下沉）；别的路钉在地面。layer：立交时谁在上面
   const ex = { free: /^(motorway|trunk)/.test(t.highway), layer: parseInt(t.layer) || (high ? 1 : low ? -1 : 0) };
+  const whole = /^George Washington Bridge/.test(t.name || '');      // 华盛顿桥整座留着（过了州界到曼哈顿岸边才到头），不然路在河中间断掉
   let ids = w.nodes.slice();
   if (t.oneway === '-1') ids.reverse();
   let cur = [];
   for (const id of ids) {
     const n = nodes.get(id);
-    if (n && inBounds(n.p)) cur.push(id);
+    if (n && (inBounds(n.p) || (whole && inRect(n.p, MARGIN, true)))) cur.push(id);
     else { if (cur.length > 1) runs.push({ a, ids: cur, high, low, ...ex }); cur = []; }
   }
   if (cur.length > 1) runs.push({ a, ids: cur, high, low, ...ex });
@@ -93,7 +106,8 @@ const DECK = 7.5, GRADE = 0.055, DEEP = -6.5, CLEAR = 5.2, H = new Map();
   r.ids = out; } }
 const fixed = new Set(); for (const r of runs) if (!r.free) for (const id of r.ids) fixed.add(id);
 const want = new Map();
-for (const r of runs) for (const id of r.ids) { if (fixed.has(id)) { want.set(id, 0); continue; } const v = r.high ? DECK : r.low ? DEEP : 0, o = want.get(id); if (o === undefined || Math.abs(v) > Math.abs(o)) want.set(id, v); }
+// 桥：layer 每高一层桥面高 7 米（华盛顿桥上层 layer=2，下层 layer=1）
+for (const r of runs) for (const id of r.ids) { if (fixed.has(id)) { want.set(id, 0); continue; } const v = r.high ? DECK + Math.max(0, r.layer - 1) * 7 : r.low ? DEEP : 0, o = want.get(id); if (o === undefined || Math.abs(v) > Math.abs(o)) want.set(id, v); }
 const edges = []; for (const r of runs) for (let i = 1; i < r.ids.length; i++) { const L = dist(nodes.get(r.ids[i - 1]).p, nodes.get(r.ids[i]).p); edges.push([r.ids[i - 1], r.ids[i], L * GRADE, r, L]); }
 // 立交：用格子找平面上相交的两条边
 const crossings = [];
@@ -332,15 +346,15 @@ const polyOf = (w) => { const pts = []; const ids = w.nodes[0] === w.nodes[w.nod
 const areaOf = (pts) => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
 const buildings = [], parks = [];
 // ---- 补充数据（tools/fetch_extra.mjs 下载的）：店铺 / 机构的名字、门牌号、用地类型、水面。没有这个文件就全靠猜 ----
-const XP = path.join(ROOT, 'tools/raw', REGION.raw.replace('.json', '_x.json')), extra = fs.existsSync(XP) ? JSON.parse(fs.readFileSync(XP, 'utf8')).elements : [];
+const extra = (() => { const seen = new Set(), out = []; for (const P of PARTS) { const XP = path.join(ROOT, 'tools/raw', P.raw.replace('.json', '_x.json')); if (!fs.existsSync(XP)) continue; for (const e of JSON.parse(fs.readFileSync(XP, 'utf8')).elements) { const k = e.type + e.id; if (!seen.has(k)) { seen.add(k); out.push(e); } } } return out; })();
 const inPoly = (pts, x, z) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a[1] > z) !== (b[1] > z) && x < (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
 const landuse = extra.filter(e => e.type === 'way' && e.tags && e.tags.landuse && e.geometry).map(e => { const pts = e.geometry.map(g => proj(g.lat, g.lon)); return { k: e.tags.landuse, pts, x0: Math.min(...pts.map(p => p[0])), x1: Math.max(...pts.map(p => p[0])), z0: Math.min(...pts.map(p => p[1])), z1: Math.max(...pts.map(p => p[1])) }; });
 // Overture Maps 的建筑数据（python -m overturemaps download --bbox=西,南,东,北 -f geojsonseq --type=building -o tools/raw/overture_<id>.geojsonl）：
 // 六成的楼有高度（来自激光雷达和微软的建筑数据），OSM 自己只有百分之几。它的每栋楼记着对应的 OSM way 编号，直接按编号对上
-const OV = new Map(); { const P = path.join(ROOT, 'tools/raw', `overture_${process.argv[2] || 'downtown'}.geojsonl`); if (fs.existsSync(P)) for (const line of fs.readFileSync(P, 'utf8').split('\n')) { const t = line.replace(/^\x1e/, '').trim(); if (!t) continue; const p = JSON.parse(t).properties, src = (p.sources || []).find(q => q.dataset === 'OpenStreetMap' && /^w\d+/.test(q.record_id || '')); if (src && (p.height || p.num_floors || p.class)) OV.set(+src.record_id.slice(1).split('@')[0], p); } }
+const OV = new Map(); for (const part of PARTS) { const P = path.join(ROOT, 'tools/raw', `overture_${part.id}.geojsonl`); if (fs.existsSync(P)) for (const line of fs.readFileSync(P, 'utf8').split('\n')) { const t = line.replace(/^\x1e/, '').trim(); if (!t) continue; const p = JSON.parse(t).properties, src = (p.sources || []).find(q => q.dataset === 'OpenStreetMap' && /^w\d+/.test(q.record_id || '')); if (src && (p.height || p.num_floors || p.class)) OV.set(+src.record_id.slice(1).split('@')[0], p); } }
 const OVKIND = { residential: 'r', house: 'r', apartments: 'r', detached: 'r', terrace: 'r', dormitory: 'r', semidetached_house: 'r', industrial: 'i', warehouse: 'i', garage: 'i', garages: 'i', shed: 'i', parking: 'i', service: 'i', commercial: 's', retail: 's', supermarket: 's', office: 'c', school: 'c', university: 'c', college: 'c', hospital: 'c', church: 'c', civic: 'c', hotel: 'c', public: 'c', government: 'c' };
 // 激光雷达算出来的每栋楼的高度和屋顶形状（tools/lidar_fetch.py → tools/lidar_buildings.py，键是轮廓第一个点的坐标）
-const LID = (() => { const P = path.join(ROOT, 'tools/raw/lidar', `roofs_${process.argv[2] || 'downtown'}.json`); return fs.existsSync(P) ? JSON.parse(fs.readFileSync(P, 'utf8')) : {}; })();
+const LID = Object.assign({}, ...PARTS.map(part => { const P = path.join(ROOT, 'tools/raw/lidar', `roofs_${part.id}.json`); return fs.existsSync(P) ? JSON.parse(fs.readFileSync(P, 'utf8')) : {}; }));
 let nOv = 0, nLid = 0, nGab = 0;
 const KIND = {}; for (const [k, list] of Object.entries({
   r: 'house detached terrace residential apartments dormitory semidetached_house bungalow',
@@ -357,7 +371,7 @@ for (const w of ways) {
     const pts = polyOf(w); if (pts.length < 3) continue;
     const A = Math.abs(areaOf(pts)); if (A < 10) continue;
     const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length, cz = pts.reduce((s, p) => s + p[1], 0) / pts.length;
-    if (Math.abs(cx) > HX + MARGIN || Math.abs(cz) > HZ + MARGIN) continue;
+    if (!inBounds([cx, cz])) continue;
     let k = KIND[t.building] || '';
     if (!k) { const lu = landuse.find(l => cx >= l.x0 && cx <= l.x1 && cz >= l.z0 && cz <= l.z1 && inPoly(l.pts, cx, cz)); if (lu) k = lu.k === 'residential' ? 'r' : lu.k === 'industrial' ? 'i' : 's'; }
     if (t.amenity && CIVIC.has(t.amenity)) k = 'c';
@@ -383,7 +397,7 @@ for (const w of ways) {
     if (t.name) { if (t.shop || SHOPLIKE.has(t.amenity)) b.nm = [cleanName(t.name)]; else b.n = cleanName(t.name); }
     buildings.push(b);
   } else if (t.leisure === 'park') {
-    const pts = polyOf(w); if (pts.length >= 3) parks.push(pts.flatMap(p => [r2(p[0]), r2(p[1])]));
+    const pts = polyOf(w); if (pts.length >= 3 && inBounds(pts[0])) parks.push(pts.flatMap(p => [r2(p[0]), r2(p[1])]));
   }
 }
 // 叠在一起的楼：OSM 里同一个位置常有两个轮廓（重复画的、大楼里又画了一块、裙楼上的塔楼）。两个模型叠着，共面的墙和屋顶会闪。
@@ -430,7 +444,9 @@ for (const w of ways) {
 //      先把线画成“墙”，把剩下的格子分成连通块，再让每段海岸线给左右两边的块投票 ----
 let water = null;
 {
-  const CW = 6, PAD = 60, X0 = -HX - PAD, Z0 = -HZ - PAD, W = Math.ceil((2 * HX + 2 * PAD) / CW), H = Math.ceil((2 * HZ + 2 * PAD) / CW), M = new Uint8Array(W * H);
+  const CW = 6, PAD = 60, X0 = BX0 - PAD, Z0 = BZ0 - PAD, W = Math.ceil((BX1 - BX0 + 2 * PAD) / CW), H = Math.ceil((BZ1 - BZ0 + 2 * PAD) / CW), M = new Uint8Array(W * H);
+  // 拼起来的图不是矩形：几块都没盖到的格子先当墙（不让河从那里漏进别的连通块），最后照同一行最近的有数据的格子填
+  const outside = new Uint8Array(W * H); if (RECTS.length > 1) for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) if (!RECTS.some(r => { const x = X0 + (i + 0.5) * CW, z = Z0 + (j + 0.5) * CW; return x >= r.x0 - PAD && x <= r.x1 + PAD && z >= r.z0 - PAD && z <= r.z1 + PAD; })) outside[j * W + i] = 1;
   const fill = (rings) => {      // 奇偶扫描线
     let z0 = 1e9, z1 = -1e9; for (const r of rings) for (const p of r) { z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); }
     for (let j = Math.max(0, Math.floor((z0 - Z0) / CW)); j <= Math.min(H - 1, Math.floor((z1 - Z0) / CW)); j++) {
@@ -448,7 +464,7 @@ let water = null;
   }
   const coast = extra.filter(e => e.type === 'way' && e.tags && e.tags.natural === 'coastline' && e.geometry).map(e => geo(e.geometry));
   if (coast.length) {
-    const wall = new Uint8Array(W * H), comp = new Int32Array(W * H), cell = (x, z) => { const i = Math.floor((x - X0) / CW), j = Math.floor((z - Z0) / CW); return i < 0 || j < 0 || i >= W || j >= H ? -1 : j * W + i; };
+    const wall = Uint8Array.from(outside), comp = new Int32Array(W * H), cell = (x, z) => { const i = Math.floor((x - X0) / CW), j = Math.floor((z - Z0) / CW); return i < 0 || j < 0 || i >= W || j >= H ? -1 : j * W + i; };
     for (const r of coast) for (let i = 0; i + 1 < r.length; i++) { const a = r[i], b = r[i + 1], n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (CW * 0.3)) + 1; for (let k = 0; k <= n; k++) { const c = cell(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n); if (c >= 0) wall[c] = 1; } }
     // 上面的画法是 8 连通的线；把斜着相邻的两格之间补一格，4 连通的填充才钻不过去
     for (let j = 0; j + 1 < H; j++) for (let i = 0; i + 1 < W; i++) { const a = j * W + i; if (wall[a] === 1 && wall[a + W + 1] === 1 && !wall[a + 1] && !wall[a + W]) wall[a + 1] = 2; if (wall[a + 1] === 1 && wall[a + W] === 1 && !wall[a] && !wall[a + W + 1]) wall[a] = 2; }
@@ -467,6 +483,18 @@ let water = null;
     for (let c = 0; c < W * H; c++) if (wall[c] && !M[c]) { const i = c % W; if ((i > 0 && M[c - 1] === 1) || (i < W - 1 && M[c + 1] === 1) || (c >= W && M[c - W] === 1) || (c + W < W * H && M[c + W] === 1)) M[c] = 3; }
     console.log(`water: ${nPoly} polygons, ${coast.length} coastline ways, ${nc} regions, ${[...vote].filter(v => v > 0).length} of them water`);
   }
+  // 州界以东（曼哈顿那边）一律当水：建筑和路都切掉了，留着是一片空地；画成河，远处有曼哈顿天际线的布景
+  { const clip = RECTS.find(r => r.clipX); if (clip) for (let j = 0; j < H; j++) { const z = Z0 + (j + 0.5) * CW, xc = clip.clipX(z); for (let i = 0; i < W; i++) { const x = X0 + (i + 0.5) * CW, c = j * W + i; if (x > xc && (outside[c] || !RECTS.some(r => !r.clipX && x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1))) { M[c] = 1; outside[c] = 0; } } } }
+  // 没盖到的格子：从有数据的格子往外扩（一圈一圈，最多 300 米，水是水、陆是陆），再远的当陆地。整行照抄会拉出一道道水带
+  if (RECTS.length > 1) {
+    let front = []; for (let c = 0; c < W * H; c++) if (!outside[c]) front.push(c);
+    for (let step = 0; step < 50 && front.length; step++) {
+      const next = [];
+      for (const c of front) { const i = c % W; for (const d of [i > 0 ? c - 1 : -1, i < W - 1 ? c + 1 : -1, c - W, c + W]) if (d >= 0 && d < W * H && outside[d] === 1) { outside[d] = 2; M[d] = M[c]; next.push(d); } }
+      front = next;
+    }
+    for (let c = 0; c < W * H; c++) if (outside[c] === 1) M[c] = 0;
+  }
   let n = 0; const rle = [];
   for (let j = 0; j < H; j++) { let cur = 0, run = 0; for (let i = 0; i < W; i++) { const v = M[j * W + i] ? 1 : 0; n += v; if (v === cur) run++; else { rle.push(run); cur = v; run = 1; } } rle.push(run); if (cur === 0) rle.push(0); }
   if (n) water = { cell: CW, w: W, h: H, x0: r2(X0), z0: r2(Z0), rle };      // 每行：陆、水、陆、水……的格数，一行的和 = w
@@ -474,7 +502,7 @@ let water = null;
   if (process.argv.includes('--pgm')) { const buf = Buffer.concat([Buffer.from(`P5\n${W} ${H}\n255\n`), Buffer.from(M.map(v => v ? 255 : 40))]); fs.writeFileSync(path.join(ROOT, 'shots/water.pgm'), buf); }
 }
 
-const out = { version: 1, origin: { lat: LAT0, lon: LON0, kx: KX, kz: KZ }, half: { x: r2(HX), z: r2(HZ) }, segs, juncs: juncOut, buildings, parks, water };
+const out = { version: 1, origin: { lat: LAT0, lon: LON0, kx: KX, kz: KZ }, half: { x: r2(HX), z: r2(HZ) }, rects: RECTS.map(r => [r2(r.x0), r2(r.z0), r2(r.x1), r2(r.z1)]), segs, juncs: juncOut, buildings, parks, water };
 fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify(out));
 const cc = {}; for (const j of juncOut) cc[j.control] = (cc[j.control] || 0) + 1;

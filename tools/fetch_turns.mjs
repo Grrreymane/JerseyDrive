@@ -1,17 +1,21 @@
 // 下载 OSM 的转向限制（禁止左转 / 右转 / 直行 / 掉头，只准左转 / 右转 / 直行），整理成 data/turns.json。
-// 用法：node tools/fetch_turns.mjs [区域 id，默认 all]
+// 用法：node tools/fetch_turns.mjs [区域 id，默认 all]（区域带 extra 的，把那几块一起下载、合在一起）
 // 每条：{ k: 限制种类, at: [纬度, 经度] 路口位置, from: [东, 南] 进路口的行驶方向, to: [东, 南] 出路口的行驶方向 }
 // 方向是本地平面上的单位向量（x 朝东、z 朝南，和地图一致）。游戏载入时按位置和方向对到路口的进口 / 出口上（sim/map.js 的 markTurnBans）。
 import fs from 'fs';
-const id = process.argv[2] || 'all', R = JSON.parse(fs.readFileSync(new URL('./regions.json', import.meta.url)))[id];
-const b = R.bbox.join(',');
-const q = `[out:json][timeout:200];relation["type"="restriction"]["restriction"](${b})->.r;.r out body;way(r.r);out geom;node(r.r);out;`;
-let j = null;
-for (let i = 0; i < 5 && !j; i++) {
+const id = process.argv[2] || 'all', RG = JSON.parse(fs.readFileSync(new URL('./regions.json', import.meta.url))), R = RG[id];
+const j = { elements: [] };
+for (const part of [id, ...(R.extra || [])]) {
+  const b = RG[part].bbox.join(',');
+  const q = `[out:json][timeout:200];relation["type"="restriction"]["restriction"](${b})->.r;.r out body;way(r.r);out geom;node(r.r);out;`;
+  let got = null;
+  for (let i = 0; i < 6 && !got; i++) {
   const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', headers: { 'User-Agent': 'osm-extract-script/1.0', 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(q) });
-  if (r.ok) j = await r.json(); else { console.log('下载失败', r.status, '重试'); await new Promise(res => setTimeout(res, 6000 * (i + 1))); }
+  if (r.ok) got = await r.json(); else { console.log('下载失败', r.status, '重试'); await new Promise(res => setTimeout(res, 6000 * (i + 1))); }
+  }
+  if (!got) process.exit(1);
+  j.elements.push(...got.elements);
 }
-if (!j) process.exit(1);
 const LAT0 = (R.bbox[0] + R.bbox[2]) / 2, KX = 111320 * Math.cos(LAT0 * Math.PI / 180), KZ = 110574;
 const P = (lat, lon) => [lon * KX, -lat * KZ];
 const ways = new Map(), nodes = new Map();
@@ -20,8 +24,9 @@ const unit = (a, b) => { const dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypo
 const geo = (w) => w.geometry.map(g => ({ id: null, ll: [g.lat, g.lon], p: P(g.lat, g.lon) })).map((g, i) => ({ ...g, id: w.nodes[i] }));
 const out = [], skip = {};
 const no = (why) => { skip[why] = (skip[why] || 0) + 1; };
+const seenRel = new Set();
 for (const r of j.elements) {
-  if (r.type !== 'relation') continue;
+  if (r.type !== 'relation' || seenRel.has(r.id)) continue; seenRel.add(r.id);
   const k = r.tags.restriction; if (!/^(no|only)_/.test(k) || k === 'no_entry' || k === 'no_exit') { no('种类 ' + k); continue; }
   const from = r.members.filter(m => m.role === 'from' && m.type === 'way'), to = r.members.filter(m => m.role === 'to' && m.type === 'way'), via = r.members.filter(m => m.role === 'via');
   if (from.length !== 1 || to.length !== 1 || !via.length) { no('成员不全'); continue; }

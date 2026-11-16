@@ -52,7 +52,7 @@ let ready = false, wantLesson = -1;
 const MAPS = { all: 'data/map_all.json', downtown: 'data/map.json', jsq: 'data/map_jsq.json', newark: 'data/map_newark.json' };
 const region = MAPS[params.get('map')] ? params.get('map') : 'all';
 // 出发地点：几个现成的街区，或者在大地图上自己选（搜地址 / 点一下 →“从这里出发”）。存的是经纬度，地图范围以后变了也还认得
-const PLACES = [['JC 市中心 · Grove St', 40.7196, -74.0431], ['Paulus Hook', 40.7147, -74.0372], ['Newport', 40.7269, -74.0345], ['Hamilton Park', 40.7275, -74.0447], ['The Heights', 40.7445, -74.0508], ['Journal Square', 40.7323, -74.0630], ['McGinley Square', 40.7252, -74.0690], ['Harrison', 40.7440, -74.1560], ['Newark 市中心', 40.7357, -74.1724], ['Newark · Ironbound', 40.7290, -74.1565]];
+const PLACES = [['JC 市中心 · Grove St', 40.7196, -74.0431], ['Paulus Hook', 40.7147, -74.0372], ['Newport', 40.7269, -74.0345], ['Hamilton Park', 40.7275, -74.0447], ['The Heights', 40.7445, -74.0508], ['Journal Square', 40.7323, -74.0630], ['McGinley Square', 40.7252, -74.0690], ['Harrison', 40.7440, -74.1560], ['Newark 市中心', 40.7357, -74.1724], ['Newark · Ironbound', 40.7290, -74.1565], ['Hoboken', 40.7413, -74.0296], ['Weehawken', 40.7637, -74.0193], ['Union City', 40.7677, -74.0322], ['West New York', 40.7856, -74.0097], ['Edgewater', 40.8170, -73.9800], ['Fort Lee', 40.8509, -73.9701]];
 let startAt = null; try { startAt = JSON.parse(localStorage.getItem('jdStartAt')); } catch { /* 存不了就用默认 */ }
 if (!startAt || typeof startAt.lat !== 'number' || typeof startAt.lon !== 'number') startAt = { name: PLACES[0][0], lat: PLACES[0][1], lon: PLACES[0][2] };
 function buildStartList() {
@@ -298,13 +298,21 @@ function updateHud() {
 
 // 小地图（车头朝上）
 const mini = $('mini'), miniC = mini.getContext('2d'), mc = nav.getContext('2d');
+// 小地图只画车附近的路和路口：按 300 米的格子先分好（整张图一万多段路，每帧全过一遍太费）
+const MG = 300, mGrid = new Map(), mKey = (i, k) => i * 100003 + k; let mStamp = 0;
+for (const s of map.segs) { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (let i = 0; i < s.n; i++) { x0 = Math.min(x0, s.px[i]); x1 = Math.max(x1, s.px[i]); z0 = Math.min(z0, s.pz[i]); z1 = Math.max(z1, s.pz[i]); } for (let i = Math.floor(x0 / MG); i <= Math.floor(x1 / MG); i++) for (let k = Math.floor(z0 / MG); k <= Math.floor(z1 / MG); k++) { const key = mKey(i, k); if (!mGrid.has(key)) mGrid.set(key, []); mGrid.get(key).push(s); } }
+for (const j of map.juncs) { const key = mKey(Math.floor(j.cx / MG), Math.floor(j.cz / MG)); if (!mGrid.has(key)) mGrid.set(key, []); mGrid.get(key).push(j); }
+const mNear = (x, z, r, out) => { out.length = 0; mStamp++; for (let i = Math.floor((x - r) / MG); i <= Math.floor((x + r) / MG); i++) for (let k = Math.floor((z - r) / MG); k <= Math.floor((z + r) / MG); k++) for (const o of mGrid.get(mKey(i, k)) || []) if (o._mm !== mStamp) { o._mm = mStamp; out.push(o); } return out; };
+const mList = [];
 function drawMini() {
   const car = S.car, W = nav.width, H = nav.height, sc = 1.15, range = W / 2 / sc + 40, CX = W / 2, CY = H * 0.7;
   mc.setTransform(1, 0, 0, 1, 0, 0); mc.fillStyle = '#141b26'; mc.fillRect(0, 0, W, H);
   mc.translate(CX, CY); mc.rotate(-Math.PI / 2 - car.h); mc.scale(sc, sc); mc.translate(-car.x, -car.z);
   mc.lineCap = 'round'; mc.lineJoin = 'round';
   if (waterImg) { const wt = raw.water, i0 = Math.max(0, Math.floor((car.x - range - wt.x0) / wt.cell)), j0 = Math.max(0, Math.floor((car.z - range - wt.z0) / wt.cell)), i1 = Math.min(wt.w, Math.ceil((car.x + range - wt.x0) / wt.cell)), j1 = Math.min(wt.h, Math.ceil((car.z + range - wt.z0) / wt.cell)); if (i1 > i0 && j1 > j0) { mc.globalAlpha = 0.32; mc.drawImage(waterImg, i0, j0, i1 - i0, j1 - j0, wt.x0 + i0 * wt.cell, wt.z0 + j0 * wt.cell, (i1 - i0) * wt.cell, (j1 - j0) * wt.cell); mc.globalAlpha = 1; } }
-  for (const s of map.segs) {
+  const near = mNear(car.x, car.z, range, mList);
+  for (const s of near) {
+    if (!s.px) continue;
     const mx = (s.px[0] + s.px[s.n - 1]) / 2, mz = (s.pz[0] + s.pz[s.n - 1]) / 2;
     if (Math.hypot(mx - car.x, mz - car.z) > range + s.len / 2) continue;
     mc.strokeStyle = S.R.cur?.seg === s ? '#9aa3b2' : s.cls === 'motorway' ? '#6a7f9e' : '#566070'; mc.lineWidth = Math.max(5, s.halfW * 2);
@@ -319,8 +327,8 @@ function drawMini() {
     route.list.forEach((r, k) => { const g = r.seg; if (Math.hypot(g.px[g.n >> 1] - car.x, g.pz[g.n >> 1] - car.z) > range + g.len) return; routePath(k).forEach(([x, z], i) => i ? mc.lineTo(x, z) : mc.moveTo(x, z)); });
     mc.stroke(); mc.fillStyle = '#ff4b3e'; mc.beginPath(); mc.arc(route.dest.x, route.dest.z, 6, 0, 7); mc.fill();
   }
-  for (const j of map.juncs) {
-    if (j.control === 'joint' || j.control === 'none' || Math.hypot(j.cx - car.x, j.cz - car.z) > range) continue;
+  for (const j of near) {
+    if (j.px || j.control === 'joint' || j.control === 'none' || Math.hypot(j.cx - car.x, j.cz - car.z) > range) continue;
     if (j.control === 'signal') {
       const st = signalState(j, S.R.A && S.R.A.j === j && S.R.A.leg ? S.R.A.leg.group : 0, S.t);
       mc.fillStyle = '#16181c'; mc.fillRect(j.cx - 5, j.cz - 5, 10, 10); mc.fillStyle = st === 'G' ? '#2ee06a' : st === 'Y' ? '#ffc21a' : '#ff3b30'; mc.beginPath(); mc.arc(j.cx, j.cz, 3.6, 0, 7); mc.fill();

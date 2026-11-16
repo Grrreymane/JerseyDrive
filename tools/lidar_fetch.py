@@ -61,9 +61,10 @@ nodes = sorted(set(nodes))
 total = sum(n for _, n in nodes); print('nodes', len(nodes), 'points', total)
 
 # 本地米坐标：和 tools/build_map.mjs 一样的投影
-LAT0, LON0 = (S + N) / 2, (W + E) / 2; KX = 111320 * math.cos(math.radians(LAT0)); KZ = 110574
-HX, HZ = (E - LON0) * KX, (N - LAT0) * KZ; PAD = 40
-GW, GH = int(2 * (HX + PAD)) + 1, int(2 * (HZ + PAD)) + 1
+# 原点：区域表里写了 origin 就用它（拼进大图的分块和大图共用一个原点），否则取范围中心
+LAT0, LON0 = R.get('origin') or [(S + N) / 2, (W + E) / 2]; KX = 111320 * math.cos(math.radians(LAT0)); KZ = 110574; PAD = 40
+X0, Z0 = (W - LON0) * KX - PAD, -(N - LAT0) * KZ - PAD
+GW, GH = int((E - W) * KX + 2 * PAD) + 1, int((N - S) * KZ + 2 * PAD) + 1
 top = np.full((GH, GW), -1e4, np.float32); ground = np.full((GH, GW), 1e4, np.float32)
 bld = np.zeros((GH, GW), np.uint8)      # 这一格里有没有分类为“建筑”的点
 cls_count = {}
@@ -79,7 +80,7 @@ with ThreadPoolExecutor(12) as ex:
         las = laspy.read(io.BytesIO(raw))
         x, y, z, c = np.asarray(las.x), np.asarray(las.y), np.asarray(las.z, np.float32), np.asarray(las.classification)
         lon = x / RE * 180 / math.pi; lat = (2 * np.arctan(np.exp(y / RE)) - math.pi / 2) * 180 / math.pi
-        gx = ((lon - LON0) * KX + HX + PAD).astype(np.int32); gz = (-(lat - LAT0) * KZ + HZ + PAD).astype(np.int32)
+        gx = ((lon - LON0) * KX - X0).astype(np.int32); gz = (-(lat - LAT0) * KZ - Z0).astype(np.int32)
         ok = (gx >= 0) & (gx < GW) & (gz >= 0) & (gz < GH) & (c != 7) & (c != 18)      # 7、18 是噪点
         gx, gz, z, c = gx[ok], gz[ok], z[ok], c[ok]
         for v, n2 in zip(*np.unique(c, return_counts=True)): cls_count[int(v)] = cls_count.get(int(v), 0) + int(n2)
@@ -89,5 +90,5 @@ with ThreadPoolExecutor(12) as ex:
         if done % 100 == 0: print(f'{done}/{len(nodes)}  {time.time() - t0:.0f}s', flush=True)
 top[top < -9e3] = np.nan; ground[ground > 9e3] = np.nan
 np.save(os.path.join(OUT, f'top_{rid}.npy'), top); np.save(os.path.join(OUT, f'ground_{rid}.npy'), ground); np.save(os.path.join(OUT, f'bld_{rid}.npy'), bld)
-json.dump({'name': name, 'x0': -(HX + PAD), 'z0': -(HZ + PAD), 'w': GW, 'h': GH, 'cell': 1, 'classes': cls_count, 'failed': fail}, open(os.path.join(OUT, f'grid_{rid}.json'), 'w'))
+json.dump({'name': name, 'x0': X0, 'z0': Z0, 'w': GW, 'h': GH, 'cell': 1, 'classes': cls_count, 'failed': fail}, open(os.path.join(OUT, f'grid_{rid}.json'), 'w'))
 print('done', 'filled', float(np.isfinite(top).mean()), 'ground', float(np.isfinite(ground).mean()), 'classes', cls_count, 'failed', fail)
