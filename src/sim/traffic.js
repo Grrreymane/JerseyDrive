@@ -30,7 +30,7 @@ function planTurn(T, c) {
   const leg = T.map.legOf(j, seg, c.fwd ? 'b' : 'a'); if (!leg) return;
   const n = useLane(seg, c.fwd), opts = [];
   for (const l of j.legs) {
-    if (l === leg || !l.exit) continue;
+    if (l === leg || !l.exit || leg.bans?.has(l)) continue;      // 禁止转弯（OSM 的转向限制）
     const outFwd = l.end === 'a', m = useLane(l.segRef, outFwd); if (!m) continue;
     const type = turnType(-leg.ox, -leg.oz, l.ox, l.oz); if (type === 'uturn') continue;
     if (n >= 2 && ((type === 'left' && c.idx !== 0) || (type === 'right' && c.idx !== n - 1))) continue;

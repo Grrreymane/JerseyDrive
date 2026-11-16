@@ -4,7 +4,7 @@ import { MPH, carCenter, carFront } from './car.js';
 import { threatsAt, playerContacts, pedAhead } from './traffic.js';
 
 export const PENALTY = {
-  red_light: 20, stop_sign: 15, rolling_stop: 10, wrong_way: 20, wrong_side: 10, crash: 20, off_road: 10,
+  red_light: 20, stop_sign: 15, turn_ban: 15, rolling_stop: 10, wrong_way: 20, wrong_side: 10, crash: 20, off_road: 10,
   no_yield: 15, no_yield_ped: 15, hit_ped: 30, hit_car: 20,
   speeding: 8, no_signal: 5, late_signal: 2, wrong_lane_from: 5, wrong_lane_into: 5, lane_no_signal: 4, over_line: 3,
 };
@@ -90,7 +90,7 @@ export function stepRules(R, car, map, t, dt, T = null) {
     if (!R.A || R.A.key !== key) {
       const leg = map.legOf(j, seg, fwd ? 'b' : 'a');
       R.A = { key, j, leg, stopped: false, stopT: -1, overLine: false, minV: 99, exits: null };
-      if (leg && j.control !== 'joint') R.A.exits = j.legs.filter(l => l !== leg).map(l => ({ type: turnType(-leg.ox, -leg.oz, l.ox, l.oz), name: l.segRef.name, ok: l.exit, oneway: l.segRef.oneway }));
+      if (leg && j.control !== 'joint') R.A.exits = j.legs.filter(l => l !== leg).map(l => ({ type: turnType(-leg.ox, -leg.oz, l.ox, l.oz), name: l.segRef.name, ok: l.exit, ban: !!leg.bans?.has(l), oneway: l.segRef.oneway }));
     }
     const A = R.A;
     const sF = loc.s + (fwd ? 1 : -1) * (CAR.front - CAR.center);
@@ -174,6 +174,9 @@ export function stepRules(R, car, map, t, dt, T = null) {
 function finishJunction(R, E, seg, car, t) {
   if (!E || !E.leg || !E.leg.approach || E.j.control === 'joint') return;
   const out = E.j.legs.find(l => l.segRef === seg);
+  if (out && E.leg.bans?.has(out)) {      // 这个进口不让这么转（禁止左转 / 掉头 / 只准直行……）
+    emit(R, 'turn_ban', car, t, E.j.name, { turn: out === E.leg ? 'uturn' : turnType(-E.leg.ox, -E.leg.oz, out.ox, out.oz) }); E.viol = true;
+  }
   if (!out || out === E.leg) return;                         // 掉头或倒了回去：不评
   const type = turnType(-E.leg.ox, -E.leg.oz, out.ox, out.oz), name = E.j.name;
   if (E.state === 'R' && E.stopped && !E.redDone) {

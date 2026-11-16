@@ -56,6 +56,9 @@ const D = {
     plate(c, 0.14, 0.04, 0.72, 0.92, WHT, BLK); c.fillStyle = BLK; c.beginPath(); c.moveTo(0.36, 0.86); c.lineTo(0.3, 0.6); c.arc(0.36, 0.56, 0.06, Math.PI, 0); c.lineTo(0.42, 0.6); c.closePath(); c.fill();
     c.strokeStyle = BLK; c.lineWidth = 0.07; c.beginPath(); c.moveTo(0.5, 0.88); c.bezierCurveTo(0.5, 0.6, 0.64, 0.6, 0.64, 0.36); c.stroke(); arrow(c, 0.64, 0.4, 0.64, 0.12, 0.07, BLK, 2);
   },
+  nostraight(c) { plate(c, 0.04, 0.04, 0.92, 0.92, WHT, BLK); arrow(c, 0.5, 0.8, 0.5, 0.2, 0.09, BLK, 2.2); prohibit(c); },
+  rightonly(c) { plate(c, 0.14, 0.04, 0.72, 0.92, WHT, BLK); bentArrow(c, 1, BLK, 0.09, 0.42, 0.62, 0.26); text(c, 'ONLY', 0.5, 0.8, 0.19); },
+  straightonly(c) { plate(c, 0.14, 0.04, 0.72, 0.92, WHT, BLK); arrow(c, 0.5, 0.66, 0.5, 0.12, 0.1, BLK, 2.2); text(c, 'ONLY', 0.5, 0.8, 0.19); },
   leftonly(c) { plate(c, 0.14, 0.04, 0.72, 0.92, WHT, BLK); bentArrow(c, -1, BLK, 0.09, 0.58, 0.62, 0.26); text(c, 'ONLY', 0.5, 0.8, 0.19); },
   nopark(c) { plate(c, 0.14, 0.04, 0.72, 0.92, WHT, RED); text(c, 'P', 0.5, 0.36, 0.42, BLK); c.strokeStyle = RED; c.lineWidth = 0.06; c.beginPath(); c.arc(0.5, 0.35, 0.25, 0, 7); c.moveTo(0.32, 0.17); c.lineTo(0.68, 0.53); c.stroke(); text(c, 'ANY', 0.5, 0.7, 0.11, RED); text(c, 'TIME', 0.5, 0.83, 0.11, RED); },
   pedxing(c) { diamond(c); person(c, 0.5, 0.5, 1.25); },

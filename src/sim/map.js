@@ -332,3 +332,26 @@ export function markNoTurnOnRed(map, rows) {
   }
   return miss;
 }
+
+/**
+ * OSM 转向限制（data/turns.json，tools/fetch_turns.mjs 生成）→ 进口 leg.bans：从这个进口不能开去的出口（Set）。
+ * 按位置找路口，按“进来的方向 / 出去的方向”找进口和出口。only_* = 除了那个出口都不行。返回 { ok, miss }
+ */
+export function markTurnBans(map, rows) {
+  const o = map.origin; let ok = 0, miss = 0;
+  for (const r of rows) {
+    if (r.k === 'no_right_turn_on_red') { miss++; continue; }      // 这个由 data/ntor.json 管
+    const x = (r.at[1] - o.lon) * o.kx, z = -(r.at[0] - o.lat) * o.kz;
+    let j = null, bd = 18; for (const k of map.juncs) { const d = Math.hypot(k.cx - x, k.cz - z) - k.r; if (d < bd) { bd = d; j = k; } }
+    if (!j || j.control === 'joint') { miss++; continue; }
+    let inL = null, a = 0.3; for (const l of j.legs) { const d = -l.ox * r.from[0] - l.oz * r.from[1]; if (l.approach && d > a) { a = d; inL = l; } }
+    let outL = null, b = 0.3; for (const l of j.legs) { const d = l.ox * r.to[0] + l.oz * r.to[1]; if (l.exit && d > b) { b = d; outL = l; } }
+    if (!inL || (!outL && r.k !== 'no_u_turn')) { miss++; continue; }
+    if (r.k === 'no_u_turn' && !outL) outL = inL;      // 双向路掉头回到同一条路
+    inL.bans ||= new Set();
+    if (r.k.startsWith('only_')) { for (const l of j.legs) if (l !== outL) inL.bans.add(l); }
+    else inL.bans.add(outL);
+    ok++;
+  }
+  return { ok, miss };
+}

@@ -1,6 +1,6 @@
 // 把路网变成 three.js 场景：地面、路面、标线、路缘、建筑、树、停着的车、红绿灯、标志。
 import * as THREE from 'three';
-import { LANE_W, XWALK_NEAR, XWALK_FAR, STOP_LINE, pointAt, offsetPoint, segY, signalState, hash } from '../sim/map.js';
+import { LANE_W, XWALK_NEAR, XWALK_FAR, STOP_LINE, pointAt, offsetPoint, segY, signalState, hash, turnType } from '../sim/map.js';
 import { makeSignAtlas, makeNameAtlas } from './signs.js';
 import { Geo, ChunkGeo, lin } from './geo.js';
 import { carModel, carModelLow, CAR_TYPES, pickCarType, treeModel, treePit, TREE_KINDS, lampPost, hydrant } from './models.js';
@@ -328,6 +328,21 @@ export function buildWorld(map, scene) {
         post(x, z, 2.75); board(Gs, x, 2.35, z, l.ox, l.oz, 0.8, 0.8, atlas.uv('stop')); backing(x, 2.35, z, l.ox, l.oz, 0.5, 0.5);
         if (j.control === 'allway') board(Gs, x, 1.78, z, l.ox, l.oz, 0.62, 0.62, atlas.uv('allway'));
       }
+      // 转向限制（OSM）：禁止左转 / 右转 / 直行 / 掉头；只剩一个方向能走时挂“只准 X”。路口前右手边一根杆子，有红绿灯的再在横臂上挂第一块
+      let banSigns = [];
+      if (l.bans && l.approach) {
+        const tOf = (b) => b === l ? 'uturn' : turnType(tx, tz, b.ox, b.oz), banned = new Set([...l.bans].map(tOf)), allowed = new Set();
+        for (const b of j.legs) if (b !== l && b.exit && !l.bans.has(b)) { const ty = tOf(b); if (ty !== 'uturn') allowed.add(ty); }
+        const turns = ['left', 'through', 'right'].filter(ty => banned.has(ty));
+        if (turns.length && allowed.size === 1) banSigns.push({ left: 'leftonly', right: 'rightonly', through: 'straightonly' }[[...allowed][0]]);
+        else banSigns.push(...turns.map(ty => ({ left: 'noleft', right: 'noright', through: 'nostraight' })[ty]));
+        if (banned.has('uturn') && !banned.has('left')) banSigns.push('nouturn');
+        if (banSigns.length) {
+          const back = STOP_LINE + (l.stop ? 4.5 : 1.5), x = l.ex + l.ox * back + rtx * (l.w + 0.9), z = l.ez + l.oz * back + rtz * (l.w + 0.9);
+          post(x, z, 2.2 + banSigns.length * 0.8);
+          banSigns.forEach((id, k) => { const y = 1.75 + (banSigns.length - k) * 0.8; board(Gs, x + l.ox * 0.05, y, z + l.oz * 0.05, l.ox, l.oz, 0.78, 0.78, atlas.uv(id)); backing(x, y, z, l.ox, l.oz, 0.62, 0.72); });
+        }
+      }
       // 单行道：ONE WAY 箭头牌（给横向来车看）+ 禁止驶入
       if (seg.oneway) {
         const wx = l.end === 'a' ? l.ox : -l.ox, wz = l.end === 'a' ? l.oz : -l.oz;     // 车流方向
@@ -357,6 +372,7 @@ export function buildWorld(map, scene) {
           ['R', 'Y', 'G'].forEach((kind, k) => lampAt.push({ x: x + l.ox * 0.16, y: y + 0.36 - k * 0.36, z: z + l.oz * 0.16, fx: l.ox, fz: l.oz, j, group: l.group, kind }));
         };
         head(hx, 5.35, hz); head(px + l.ox * 0.25 - rtx * 0.3, 3.3, pz + l.oz * 0.25 - rtz * 0.3);
+        if (banSigns.length) { const sx = hx - rtx * 1.0, sz = hz - rtz * 1.0; board(Gs, sx + l.ox * 0.05, 5.35, sz + l.oz * 0.05, l.ox, l.oz, 0.95, 0.95, atlas.uv(banSigns[0])); backing(sx, 5.35, sz, l.ox, l.oz, 0.8, 0.86); }      // 横臂上灯头左边
         if (l.ntor) {      // NO TURN ON RED：挂在横臂上灯头右边，杆子上再挂一块
           const sx = hx + rtx * 1.0, sz = hz + rtz * 1.0; board(Gs, sx + l.ox * 0.05, 5.35, sz + l.oz * 0.05, l.ox, l.oz, 0.95, 0.95, atlas.uv('notor')); backing(sx, 5.35, sz, l.ox, l.oz, 0.66, 0.86);
           board(Gs, px + l.ox * 0.2, 2.45, pz + l.oz * 0.2, l.ox, l.oz, 0.8, 0.8, atlas.uv('notor')); backing(px + l.ox * 0.15, 2.45, pz + l.oz * 0.15, l.ox, l.oz, 0.56, 0.72);

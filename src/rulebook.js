@@ -7,6 +7,7 @@ export const EVENT_TEXT = {
     : e.afterStop
     ? { title: '红灯时不能' + (e.turn === 'left' ? '左转' : '直行'), body: '红灯下唯一允许的动作是右转：先在停止线前完全停住，确认没有车和行人再转。新泽西不允许红灯左转。' }
     : { title: '闯红灯', body: '红灯必须在白色停止线前完全停住，等绿灯再走。想右转也要先停稳，不能直接拐过去。' },
+  turn_ban: (e) => ({ title: '这里禁止' + { left: '左转', right: '右转', through: '直行', uturn: '掉头' }[e.turn], body: '路口前挂着禁止' + { left: '左转', right: '右转', through: '直行', uturn: '掉头' }[e.turn] + '的牌子（红圈加斜杠），或者只准某个方向的白底黑箭头牌。进路口前看一眼路口右前方和红绿灯旁边的白色牌子；地上画了箭头的车道也只能按箭头走。要去那边就先直行，再从下一个路口绕回来。' }),
   stop_sign: () => ({ title: '没有在 STOP 前停车', body: 'STOP 标志前必须完全停住（速度归零），停在白色停止线前；没有停止线就停在人行横道前。左、右、再左看一遍，确认安全再走。' }),
   rolling_stop: (e) => ({ title: '滑行通过 STOP（没停稳）', body: `你最慢时还有约 ${Math.round(e.mph)} mph。减速不等于停车，车必须完全静止。这是路考最常见的扣分项。` }),
   over_line: () => ({ title: '停得太靠前', body: '车头越过了停止线，压到人行横道上了。应该让车头停在白色停止线之前。' }),
@@ -35,7 +36,7 @@ export const EVENT_TEXT = {
   good_turn: (e) => ({ title: (e.turn === 'left' ? '左转' : '右转') + '完成：打灯、车道都对', body: '' }),
 };
 export const EVENT_SHORT = {
-  red_light: '闯红灯', stop_sign: 'STOP 没停', rolling_stop: 'STOP 没停稳', over_line: '越过停止线', wrong_way: '单行道逆行', wrong_side: '压到对向车道', speeding: '超速',
+  red_light: '闯红灯', turn_ban: '违反禁止转弯', stop_sign: 'STOP 没停', rolling_stop: 'STOP 没停稳', over_line: '越过停止线', wrong_way: '单行道逆行', wrong_side: '压到对向车道', speeding: '超速',
   no_yield: '没让有路权的车', no_yield_ped: '没礼让行人', hit_ped: '撞到行人', hit_car: '撞到别的车',
   no_signal: '转弯没打灯', late_signal: '打灯太晚', wrong_lane_from: '转弯起始车道不对', wrong_lane_into: '转弯后进错车道', lane_no_signal: '变道没打灯', crash: '碰撞', off_road: '开上人行道',
   good_lane: '变道规范', good_yield: '礼让行人', good_stop: 'STOP 完全停稳', good_ror: '红灯右转正确', good_turn: '转弯规范',
@@ -78,9 +79,12 @@ export const SIGN_BOOK = [
   { id: 'notor', en: 'NO TURN ON RED', zh: '红灯禁止转弯', tip: '新泽西默认允许红灯右转（先停稳、让行），挂了这块牌子的路口不行，要等绿灯。牌子一般挂在红绿灯旁边。游戏里只标了查得到出处的路口（Heights 一带、Monticello Ave 等）。' },
   { id: 'noleft', en: 'NO LEFT TURN', zh: '禁止左转', tip: '红圈加斜杠 = 禁止。新泽西很多大路不让直接左转，要走右边的 jughandle 匝道绕过去。' },
   { id: 'noright', en: 'NO RIGHT TURN', zh: '禁止右转', tip: '这个路口不能右转。' },
+  { id: 'nostraight', en: 'NO STRAIGHT THROUGH', zh: '禁止直行', tip: '这个路口不能直着穿过去，只能左转或右转。' },
   { id: 'nouturn', en: 'NO U-TURN', zh: '禁止掉头', tip: '这里不能掉头。' },
   { id: 'keepright', en: 'KEEP RIGHT', zh: '靠右行驶', tip: '前面有隔离岛或障碍，从它右边过。' },
-  { id: 'leftonly', en: 'LEFT TURN ONLY', zh: '左转专用道', tip: '进了这条车道就只能左转，不能直行。' },
+  { id: 'leftonly', en: 'LEFT TURN ONLY', zh: '只准左转', tip: '挂在车道上方：这条车道只能左转；挂在路边：从这条路过来只能左转。' },
+  { id: 'rightonly', en: 'RIGHT TURN ONLY', zh: '只准右转', tip: '这条路到路口只能右转，不能直行、左转。' },
+  { id: 'straightonly', en: 'STRAIGHT ONLY', zh: '只准直行', tip: '这个路口不能转弯，只能直着过去。' },
   { id: 'stophere', en: 'STOP HERE ON RED', zh: '红灯在此停车', tip: '停止线位置比平常靠后，红灯时停在牌子指的线前。' },
   { id: 'nopark', en: 'NO PARKING', zh: '禁止停车', tip: '可以临时上下客，但人不能离开车。另外消防栓前后 10 英尺、人行横道前 25 英尺、STOP 前 50 英尺内都不能停。' },
   { cat: '警告（黄色菱形，提醒前方情况）' },

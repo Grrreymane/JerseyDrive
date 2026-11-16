@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { prepareMap, markNoTurnOnRed, signalState, laneCenter, laneInfo, offsetPoint, pointAt, segY, turnType, CAR } from './sim/map.js';
+import { prepareMap, markNoTurnOnRed, markTurnBans, signalState, laneCenter, laneInfo, offsetPoint, pointAt, segY, turnType, CAR } from './sim/map.js';
 import { makeCar, stepCar, setSignal, shift, carCenter, MPH, GEARS } from './sim/car.js';
 import { makeTraffic, stepTraffic } from './sim/traffic.js';
 import { buildActors } from './view/actors.js';
@@ -120,6 +120,8 @@ await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));      // �
 const raw = await (await fetch(MAPS[region])).json();
 const map = prepareMap(raw);
 // 禁止红灯右转的路口（有出处的那些）：标到进口上，规则、标志、教练提示都看它
+// 禁止左转 / 掉头 / 只准直行……（OSM 的转向限制）：标到进口上，规则、标志、车流、导航都看它
+try { const r = markTurnBans(map, (await (await fetch('data/turns.json')).json()).rows); console.info('转向限制：对上', r.ok, '条，没对上', r.miss, '条'); } catch { /* 文件缺了就当没有 */ }
 try { const miss = markNoTurnOnRed(map, (await (await fetch('data/ntor.json')).json()).rows); if (miss.length) console.info('NTOR 没对上：', miss.map(r => r.street || r.at).join('；')); } catch { /* 文件缺了就当没有 */ }
 const world = buildWorld(map, scene);
 // 水面（浅蓝，透明底），大地图和小地图都用
@@ -257,7 +259,7 @@ function showEvents() {
     if (ev.sev === 'bad') audio.bad(); else if (ev.sev === 'good') audio.good(); else if (ev.sev === 'minor') audio.minor();
   }
 }
-const ARROW = { left: '↰', right: '↱', through: '↑', uturn: '↶' }, ORDER = { left: 0, through: 1, right: 2, uturn: 3 };
+const ARROW = { left: '↰', right: '↱', through: '↑', uturn: '↶' }, TURN_WORD = { left: '左转', right: '右转', through: '直行', uturn: '掉头' }, ORDER = { left: 0, through: 1, right: 2, uturn: 3 };
 function updateHud() {
   const car = S.car, R = S.R, cur = R.cur, mph = Math.abs(car.v) * MPH;
   set('speed', Math.round(mph), (v) => el.speed.textContent = v);
@@ -290,7 +292,7 @@ function updateHud() {
   set('pv', key, () => {
     el.preview.classList.toggle('hidden', !pv); if (!pv) return;
     el.preview.innerHTML = pv.exits.slice().sort((a, b) => ORDER[a.type] - ORDER[b.type]).filter(e => e.type !== 'uturn').map(e =>
-      `<div class="ex ${e.ok ? '' : 'no'}"><b>${ARROW[e.type]}</b>${shortName(e.name || '无名路')}<small>${e.ok ? (e.oneway ? '单行，可进' : '双向') : '✕ 单行道，不能进'}</small></div>`).join('');
+      `<div class="ex ${e.ok && !e.ban ? '' : 'no'}"><b>${ARROW[e.type]}</b>${shortName(e.name || '无名路')}<small>${!e.ok ? '✕ 单行道，不能进' : e.ban ? '✕ 禁止' + TURN_WORD[e.type] : e.oneway ? '单行，可进' : '双向'}</small></div>`).join('');
   });
 }
 
@@ -748,7 +750,7 @@ function planRoute(dest) {
     if (seg === dest.seg && u !== st) { goal = u; break; }
     const j = fwd ? seg.jb : seg.ja; if (!j) continue; const leg = map.legOf(j, seg, fwd ? 'b' : 'a'); if (!leg) continue;
     for (const l of j.legs) {
-      if (l === leg || !l.exit) continue; const g = l.segRef, f2 = l.end === 'a'; if (!(f2 ? g.lf : g.lb)) continue;
+      if (l === leg || !l.exit || leg.bans?.has(l)) continue; const g = l.segRef, f2 = l.end === 'a'; if (!(f2 ? g.lf : g.lb)) continue;
       const type = turnType(-leg.ox, -leg.oz, l.ox, l.oz); if (type === 'uturn') continue;
       const v = g.id * 2 + (f2 ? 1 : 0), cost = best + g.useLen / (g.speed / MPH) + (j.control === 'joint' ? 0 : (type === 'left' ? 12 : type === 'right' ? 6 : 3) + (j.control === 'signal' ? 8 : 0));
       if (cost < dist[v]) { dist[v] = cost; prev[v] = u; }
