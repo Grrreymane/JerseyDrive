@@ -239,6 +239,7 @@ function readInput(dt) {
 }
 
 // ---------- 界面 ----------
+$('hazBtn').onclick = (e) => { setSignal(S.car, 2); e.currentTarget.blur(); };
 const el = { speed: $('speed'), street: $('streetName'), info: $('streetInfo'), score: $('scoreNum'), limit: $('limitNum'), sigL: $('sigL'), sigR: $('sigR'), coach: $('coach'), cIcon: $('coachIcon'), cText: $('coachText'), cSub: $('coachSub'), preview: $('preview'), gas: $('pGas'), brake: $('pBrake'), clean: $('cleanNum'), cleanBest: $('cleanBest') };
 const gearEls = [...document.querySelectorAll('#gears span')];
 const last = {};
@@ -249,7 +250,11 @@ function toast(ev, title, body, ms) {
   const pen = PENALTY[ev.type] ? `<span class="pen">−${PENALTY[ev.type]}</span>` : '';
   d.innerHTML = `${pen}<h4>${title}</h4>${body ? `<p>${body}</p>` : ''}`;
   const box = $('toasts'); box.prepend(d); while (box.children.length > 3) box.lastChild.remove();
-  setTimeout(() => { d.classList.add('out'); setTimeout(() => d.remove(), 500); }, ms || (ev.sev === 'good' ? 2800 : ev.sev === 'info' ? 3200 : 9000));
+  // 到时间自己淡出；鼠标放在上面就停住，移开后再给 2.5 秒
+  let timer = 0; const go = (t) => { clearTimeout(timer); timer = setTimeout(() => { d.classList.add('out'); setTimeout(() => d.remove(), 500); }, t); };
+  d.onmouseenter = () => { clearTimeout(timer); d.classList.remove('out'); d.classList.add('hold'); };
+  d.onmouseleave = () => { d.classList.remove('hold'); go(2500); };
+  go(ms || (ev.sev === 'good' ? 2800 : ev.sev === 'info' ? 3200 : 9000));
 }
 function showEvents() {
   for (const ev of S.R.events) {
@@ -275,6 +280,9 @@ function updateHud() {
   const blink = (performance.now() % 760) < 380;
   set('sigL', (car.signal === -1 || car.signal === 2) && blink, (v) => el.sigL.classList.toggle('on', v));
   set('sigR', (car.signal === 1 || car.signal === 2) && blink, (v) => el.sigR.classList.toggle('on', v));
+  set('haz', car.signal === 2 && blink, (v) => $('hazBtn').classList.toggle('on', v));
+  // 开着双闪一直在走：提醒一次（双闪是停在路边、车坏了时用的）
+  if (car.signal === 2 && Math.abs(car.v) * MPH > 15) { S.hazT = (S.hazT || 0) + 1 / 60; if (S.hazT > 8 && !S.hazTold) { S.hazTold = true; toast({ sev: 'info' }, '开着双闪在走', '双闪是靠边停车、车坏了、前面突然堵住要提醒后车时用的。正常行驶按 F 关掉。', 6000); } } else S.hazT = 0;
   set('gas', Math.round(car.throttle * 20), (v) => el.gas.style.setProperty('--v', v * 5 + '%'));
   set('brk', Math.round(car.brake * 20), (v) => el.brake.style.setProperty('--v', v * 5 + '%'));
   audio.blinker(car.signal !== 0 && S.running && !S.paused, blink);
@@ -815,7 +823,7 @@ function navTick() {
   $('navSub').textContent = (kind === 'arrive' ? shortName(route.dest.name || '目的地') : '进入 ' + shortName(into || '无名路')) + `　·　全程还剩 ${total >= 1000 ? (total / 1000).toFixed(1) + ' 公里' : Math.round(total / 10) * 10 + ' 米'}` + sig;
   show('navBox', true);
 }
-window.__jd.setDest = setDest; window.__jd.navRoute = () => route;
+window.__jd.setDest = setDest; window.__jd.navRoute = () => route; window.__jd.toast = toast;
 
 // ---------- 大地图搜索：街名、门牌 + 街名、店名 / 楼名 ----------
 {
