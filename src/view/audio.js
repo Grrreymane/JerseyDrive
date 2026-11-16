@@ -39,6 +39,17 @@ export function makeAudio() {
     const n = ctx.createBufferSource(), buf = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate), d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
     const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = hard ? 2400 : 900; const g2 = ctx.createGain(); g2.gain.value = 0.28; n.buffer = buf; n.connect(f).connect(g2).connect(ctx.destination); n.start(t);
   };
+  // 警笛：一个方波，音高用慢速的低频振荡在 650–1350 Hz 之间来回（“呜——哇——”），音量按距离
+  let sir = null;
+  A.siren = (dist) => {
+    if (!ctx) return; const vol = dist > 260 ? 0 : 0.045 * Math.min(1, (260 - dist) / 200);
+    if (!sir && vol > 0) {
+      const o = ctx.createOscillator(), lfo = ctx.createOscillator(), depth = ctx.createGain(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+      o.type = 'square'; o.frequency.value = 1000; lfo.frequency.value = 0.45; depth.gain.value = 350; lfo.connect(depth).connect(o.frequency);
+      f.type = 'lowpass'; f.frequency.value = 2200; g.gain.value = 0; o.connect(f).connect(g).connect(ctx.destination); o.start(); lfo.start(); sir = { o, lfo, g };
+    }
+    if (sir) sir.g.gain.setTargetAtTime(vol, ctx.currentTime, 0.2);
+  };
   A.horn = () => { beep(420, 0.45, 0.1, 'sawtooth'); beep(520, 0.45, 0.08, 'sawtooth'); };
   return A;
 }

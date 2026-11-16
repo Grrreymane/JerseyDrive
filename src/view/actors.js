@@ -16,6 +16,7 @@ export function buildActors(scene, max = 48) {
     update(T, t) {
       let k = 0; const used = {};
       for (const c of T.cars) {
+        if (c.kind === 'bus' || c.kind === 'ems') continue;      // 校车、救护车、警车由 special.js 画
         const ty = c.ty || (c.ty = pickCarType(c.tr ?? 0)), m = carM[ty], i = used[ty] = (used[ty] || 0) + 1; if (i > max) continue;
         Q.setFromAxisAngle(UP, -c.h); M.compose(V.set(c.x, c.y || 0, c.z), Q, S); m.setMatrixAt(i - 1, M);
         // 被撞停住的车打双闪：车身颜色一明一暗

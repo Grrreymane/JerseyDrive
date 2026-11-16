@@ -1,14 +1,14 @@
 // 交规判定：每一步看车的位置和状态，产出事件（违规 / 做对了 / 提示）。纯逻辑。
 import { STOP_LINE, CAR, LANE_W, laneInfo, turnType, signalState } from './map.js';
 import { MPH, carCenter, carFront } from './car.js';
-import { threatsAt, playerContacts, pedAhead } from './traffic.js';
+import { threatsAt, playerContacts, pedAhead, sAbsOf } from './traffic.js';
 
 export const PENALTY = {
   red_light: 20, stop_sign: 15, turn_ban: 15, rolling_stop: 10, wrong_way: 20, wrong_side: 10, crash: 20, off_road: 10,
   no_yield: 15, no_yield_ped: 15, hit_ped: 30, hit_car: 20,
-  speeding: 8, tailgate: 4, block_box: 8, keep_right: 3, no_signal: 5, late_signal: 2, wrong_lane_from: 5, wrong_lane_into: 5, lane_no_signal: 4, over_line: 3,
+  pass_bus: 25, no_yield_ems: 15, speeding: 8, tailgate: 4, block_box: 8, keep_right: 3, no_signal: 5, late_signal: 2, wrong_lane_from: 5, wrong_lane_into: 5, lane_no_signal: 4, over_line: 3,
 };
-const SEV = { good_lane: 'good', good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_lor: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor', tailgate: 'minor', keep_right: 'minor' };
+const SEV = { good_lane: 'good', good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_lor: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor', tailgate: 'minor', keep_right: 'minor', good_bus: 'good', good_ems: 'good' };
 
 export function makeRules() {
   return {
@@ -80,6 +80,27 @@ export function stepRules(R, car, map, t, dt, T = null) {
       const g = a - (CAR.L + o.L) / 2; if (g < gapD) { gapD = g; lead = o; }
     }
     R.lead = lead; R.leadGap = gapD;
+    // 校车停着闪红灯：同一条路上，从后面来、从对面来都要停，离它 25 英尺以外；开过去算严重违规。停住等它走了算做对
+    R.busD ||= {};
+    for (const b of T.cars) {
+      if (b.kind !== 'bus' || b.mode !== 'seg' || b.seg !== seg) continue;
+      const d = (sAbsOf(b) - loc.s) * (fwd ? 1 : -1) - (b.L + CAR.L) / 2, prev = R.busD[b.id];      // 车头到校车车身的距离（正 = 校车在前面）
+      R.busD[b.id] = d;
+      if (!(b.flash > 0)) { if (R.busWait === b.id) { R.busWait = null; emit(R, 'good_bus', car, t, street); } continue; }
+      if (d > -2 && d < 70 && !R.alert) R.alert = 'bus';
+      if (prev !== undefined && prev > -1 && d <= -1 && sp0 > 0.5 && !R.busPassed?.[b.id]) { (R.busPassed ||= {})[b.id] = true; emit(R, 'pass_bus', car, t, street); }
+      if (d > 0 && d < 45 && sp0 < 0.3) R.busWait = b.id;
+    }
+    // 后面有鸣笛的救护车 / 警车：靠右停下让它过去。它在后面 80 米内、你还一直在开（超过 6 秒）算没让；停下等它过去算做对
+    let ems = null, dE = 0;
+    for (const e of T.cars) if (e.kind === 'ems' && e.mode === 'seg' && e.seg === seg && e.fwd === fwd) { const d = (loc.s - sAbsOf(e)) * (fwd ? 1 : -1); if (d > -10 && d < 80) { ems = e; dE = d; } }
+    if (ems) {
+      if (dE > 0) { if (!R.alert || R.alert === 'close') R.alert = 'ems'; R.emsT = sp0 * MPH > 6 ? (R.emsT || 0) + dt : Math.max(0, (R.emsT || 0) - dt); if (sp0 < 0.8) R.emsOk = ems.id; }
+      if (R.emsT > 6 && R.emsBad !== ems.id) { R.emsBad = ems.id; emit(R, 'no_yield_ems', car, t, street); }
+      if (dE < -4 && R.emsOk === ems.id && R.emsBad !== ems.id) { R.emsOk = null; R.emsBad = ems.id; emit(R, 'good_ems', car, t, street); }
+    } else R.emsT = 0;
+    // 路边有车打着灯要开出来、离你 45 米内：提醒一下
+    if (!R.alert) for (const o of T.cars) if ((o.parked || o.pulling) && o.mode === 'seg' && o.seg === seg && o.fwd === fwd) { const d = (sAbsOf(o) - loc.s) * (fwd ? 1 : -1); if (d > 3 && d < 45 && sp0 > 3) { R.alert = 'pullout'; break; } }
     // 跟车距离：新泽西驾驶手册说至少 3 秒。不到 2 秒提醒，不到 1.2 秒连着 3 秒算违规（30 秒内只记一次）
     const tGap = sp0 > 1 ? gapD / sp0 : 99;
     if (sp0 * MPH > 15 && lead && tGap < 2 && !R.alert) R.alert = 'close';

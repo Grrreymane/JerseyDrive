@@ -3,6 +3,7 @@ import { prepareMap, markNoTurnOnRed, markTurnBans, signalState, laneCenter, lan
 import { makeCar, stepCar, setSignal, shift, carCenter, MPH, GEARS } from './sim/car.js';
 import { makeTraffic, stepTraffic } from './sim/traffic.js';
 import { buildActors } from './view/actors.js';
+import { buildSpecial } from './view/special.js';
 import { makeRules, stepRules, clearTransient, PENALTY } from './sim/rules.js';
 import { buildWorld } from './view/world.js';
 import { buildSky } from './view/sky.js';
@@ -52,7 +53,7 @@ let ready = false, wantLesson = -1;
 const MAPS = { all: 'data/map_all.json', downtown: 'data/map.json', jsq: 'data/map_jsq.json', newark: 'data/map_newark.json' };
 const region = MAPS[params.get('map')] ? params.get('map') : 'all';
 // 出发地点：几个现成的街区，或者在大地图上自己选（搜地址 / 点一下 →“从这里出发”）。存的是经纬度，地图范围以后变了也还认得
-const PLACES = [['JC 市中心 · Grove St', 40.7196, -74.0431], ['Paulus Hook', 40.7147, -74.0372], ['Newport', 40.7269, -74.0345], ['Hamilton Park', 40.7275, -74.0447], ['The Heights', 40.7445, -74.0508], ['Journal Square', 40.7323, -74.0630], ['McGinley Square', 40.7252, -74.0690], ['Harrison', 40.7440, -74.1560], ['Newark 市中心', 40.7357, -74.1724], ['Newark · Ironbound', 40.7290, -74.1565], ['Hoboken', 40.7413, -74.0296], ['Weehawken', 40.7637, -74.0193], ['Union City', 40.7677, -74.0322], ['West New York', 40.7856, -74.0097], ['Edgewater', 40.8170, -73.9800], ['Fort Lee', 40.8509, -73.9701]];
+const PLACES = [['JC 市中心 · Grove St', 40.7196, -74.0431], ['Paulus Hook', 40.7147, -74.0372], ['Newport', 40.7269, -74.0345], ['Hamilton Park', 40.7275, -74.0447], ['The Heights', 40.7445, -74.0508], ['Journal Square', 40.7323, -74.0630], ['McGinley Square', 40.7252, -74.0690], ['Harrison', 40.7440, -74.1560], ['Newark 市中心', 40.7357, -74.1724], ['Newark · Ironbound', 40.7290, -74.1565], ['Hoboken', 40.7413, -74.0296], ['Weehawken', 40.7637, -74.0193], ['Union City', 40.7677, -74.0322], ['West New York', 40.7856, -74.0097], ['Edgewater', 40.8170, -73.9800], ['Fort Lee', 40.8509, -73.9701], ['Secaucus', 40.7895, -74.0565], ['Greenville', 40.7000, -74.0800], ['Liberty State Park', 40.7040, -74.0550], ['Bayonne', 40.6687, -74.1143]];
 let startAt = null; try { startAt = JSON.parse(localStorage.getItem('jdStartAt')); } catch { /* 存不了就用默认 */ }
 if (!startAt || typeof startAt.lat !== 'number' || typeof startAt.lon !== 'number') startAt = { name: PLACES[0][0], lat: PLACES[0][1], lon: PLACES[0][2] };
 function buildStartList() {
@@ -134,7 +135,7 @@ if (world.waterCanvas) {
 // 导航画面：一张画布，既贴在车里的中控屏上，也给车外视角的圆形小地图用
 const nav = document.createElement('canvas'); nav.width = 640; nav.height = 380;
 const view = buildCarView(scene, renderer, nav); carView = view; applyCar();
-const actors = buildActors(scene);
+const actors = buildActors(scene), special = buildSpecial(scene);
 // 车流和行人（地址加 ?empty 关掉，空城练习）
 const trafficOn = !params.has('empty') && !(params.has('spot') && !params.has('traffic')) && !params.has('bench');
 let T = makeTraffic(map);
@@ -183,7 +184,6 @@ function restart() { if (ready) clearRoute(); endClean(); S.crash = null; $('hit
 restart();
 
 // ---------- 输入 ----------
-let lookHold = 0;
 const keys = new Set(); const inp = { throttle: 0, brake: 0, steer: 0, analog: false }; let padPrev = [];
 const GEAR_KEY = { Digit1: 'P', Digit2: 'R', Digit3: 'N', Digit4: 'D' };
 addEventListener('keydown', (e) => {
@@ -234,8 +234,8 @@ function readInput(dt) {
   }
   inp.steer = steer; inp.analog = analog;
   // 右后视镜在正前方视野外面：按 X 先转到正对右镜（约 54°），按住超过半秒再继续转成回头看右后方盲区
-  const L = k('KeyZ'), Rr = k('KeyX'); lookHold = Rr && !L ? lookHold + dt : 0;
-  return L && Rr ? Math.PI : L ? -1.3 : Rr ? (lookHold > 0.55 ? 1.5 : 0.94) : 0;
+  const L = k('KeyZ'), Rr = k('KeyX');
+  return L && Rr ? Math.PI : L ? -1.3 : Rr ? 1.35 : 0;      // 向右看一次转到位（以前先转一点、按住再转第二段，看着像卡了一下）
 }
 
 // ---------- 界面 ----------
@@ -343,7 +343,7 @@ function drawMini() {
     } else { mc.fillStyle = '#d0121f'; mc.beginPath(); for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; mc[i ? 'lineTo' : 'moveTo'](j.cx + Math.cos(a) * 5, j.cz + Math.sin(a) * 5); } mc.fill(); }
   }
   if (trafficOn) {      // 别的车（黄点）和正在过马路的人（白点）
-    mc.fillStyle = '#ffd24a'; for (const o of T.cars) { mc.beginPath(); mc.arc(o.x, o.z, 2.6, 0, 7); mc.fill(); }
+    for (const o of T.cars) { mc.fillStyle = o.kind === 'ems' ? '#ff3b30' : o.kind === 'bus' ? '#ff9f0a' : '#ffd24a'; mc.beginPath(); mc.arc(o.x, o.z, o.kind === 'car' || o.kind === 'pullout' ? 2.6 : 4, 0, 7); mc.fill(); }
     mc.fillStyle = '#ffffff'; for (const o of T.peds) if (o.onRoad) { mc.beginPath(); mc.arc(o.x, o.z, 1.8, 0, 7); mc.fill(); }
   }
   mc.setTransform(1, 0, 0, 1, CX, CY); mc.fillStyle = '#4da3ff'; mc.strokeStyle = '#fff'; mc.lineWidth = 3;
@@ -477,7 +477,8 @@ function tick(now) {
   if (frame % 6 === 0) world.updateLod(S.car.x, S.car.z);
   world.stream(S.car.x, S.car.z);
   sky.update(view.camera, S.car.x, S.car.z, (frame & 1) === 0);
-  if (trafficOn) actors.update(T, S.t);
+  if (trafficOn) { actors.update(T, S.t); special.update(T, S.t); }
+  audio.siren(trafficOn && S.running && !S.paused ? special.sirenDist(T, S.car.x, S.car.z) : 1e9);
   view.renderMirrors(); post.render(scene, view.camera);
   frame++; requestAnimationFrame(tick);
 }
@@ -533,7 +534,7 @@ window.__jd = {
     return { pts, len: d };
   },
   fly(v = 9, total = 300, bench = false) { const r = window.__jd.route(total); renderer.info.autoReset = false; S.fly = { ...r, d: 0, v, ft: bench ? [] : null, calls: 0, tris: 0 }; },
-  render() { world.updateLod(S.car.x, S.car.z); world.updateSignals(S.t); view.update(S.car, lookT, 0.016); updateHud(); drawMini(); sky.update(view.camera, S.car.x, S.car.z); view.renderMirrors(); post.render(scene, view.camera); },
+  render() { world.updateLod(S.car.x, S.car.z); world.updateSignals(S.t); if (trafficOn) { actors.update(T, S.t); special.update(T, S.t); } view.update(S.car, lookT, 0.016); updateHud(); drawMini(); sky.update(view.camera, S.car.x, S.car.z); view.renderMirrors(); post.render(scene, view.camera); },
   /** 调试：把镜头固定在一个位置看向一个点 */
   lookFrom(px, py, pz, tx, ty, tz) {
     $('hud').style.display = 'none'; const c = view.camera;

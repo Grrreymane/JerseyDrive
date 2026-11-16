@@ -250,7 +250,7 @@ export function buildCarView(scene, renderer, navCanvas) {
     const cy = car.y || 0; root.position.set(car.x, cy, car.z); root.rotation.y = -car.h;
     wheel.rotation.z = -car.steer * 7.3;       // 约 1.2 圈打到底
     stalk.rotation.z += ((car.signal === 1 ? 0.22 : car.signal === -1 ? -0.22 : 0) - stalk.rotation.z) * Math.min(1, dt * 14 + 0.02);
-    view.look += (lookTarget - view.look) * Math.min(1, dt * 9);
+    view.look += (lookTarget - view.look) * Math.min(1, dt * 4.5);      // 转头慢一点，像真人扭头（以前 9，一下就甩过去了）
     const fx = Math.cos(car.h), fz = Math.sin(car.h), rx = -fz, rz = fx;
     const cx0 = car.x + fx * CAR.center, cz0 = car.z + fz * CAR.center;
     camera.up.set(0, 1, 0);

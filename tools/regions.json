@@ -51,7 +51,9 @@
       -74.11099999999999
     ],
     "extra": [
-      "north"
+      "north",
+      "west",
+      "south"
     ]
   },
   "north": {
@@ -70,5 +72,37 @@
       -74.11099999999999
     ],
     "clip": "nj_ny_border.json"
+  },
+  "west": {
+    "name": "Secaucus 和 North Bergen 西边",
+    "en": "Secaucus",
+    "bbox": [
+      40.745,
+      -74.115,
+      40.83,
+      -74.04
+    ],
+    "raw": "osm_west.json",
+    "out": "map_all.json",
+    "origin": [
+      40.729,
+      -74.11099999999999
+    ]
+  },
+  "south": {
+    "name": "Greenville 到 Bayonne",
+    "en": "Bayonne",
+    "bbox": [
+      40.6455,
+      -74.125,
+      40.712,
+      -74.025
+    ],
+    "raw": "osm_south.json",
+    "out": "map_all.json",
+    "origin": [
+      40.729,
+      -74.11099999999999
+    ]
   }
 }
