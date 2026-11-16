@@ -103,3 +103,8 @@ button.ghost { background: rgba(255, 255, 255, 0.07); color: var(--text); font-w
 #carTypes { display: flex; gap: 6px; flex-wrap: wrap; } #carTypes button { padding: 6px 11px; font-size: 13px; }
 #carColors { display: flex; gap: 6px; } #carColors button { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25); margin: 0; }
 #carColors button.on { border-color: #fff; box-shadow: 0 0 0 2px #4285f4; }
+/* 图鉴里的交规要点 */
+.rules { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; margin-bottom: 8px; }
+.rule { background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.rule b { font-size: 15px; } .rule p { margin: 5px 0 0; color: #cfd3d9; font-size: 14px; line-height: 1.5; }
+.rule .tag { float: right; font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-left: 8px; } .rule .tag.on { color: #37e06b; border-color: rgba(55, 224, 107, 0.5); }

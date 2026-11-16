@@ -5,7 +5,7 @@ export const EVENT_TEXT = {
   red_light: (e) => e.afterStop && e.ntor && e.turn === 'right'
     ? { title: '这个路口禁止红灯右转', body: '路口挂着 NO TURN ON RED（红灯禁止转弯）的牌子：红灯时右转也不行，要等绿灯。新泽西默认允许红灯右转，但有这块牌子就不行。进路口前看一眼红绿灯旁边和右前方的白底黑字牌子。' }
     : e.afterStop
-    ? { title: '红灯时不能' + (e.turn === 'left' ? '左转' : '直行'), body: '红灯下唯一允许的动作是右转：先在停止线前完全停住，确认没有车和行人再转。新泽西不允许红灯左转。' }
+    ? { title: '红灯时不能' + (e.turn === 'left' ? '左转' : '直行'), body: '红灯下只有两种情况能转：右转；或者从单行道左转进另一条单行道。都要先在停止线前完全停住、让车和行人，路口没挂 NO TURN ON RED。别的情况（双向路左转、直行）都要等绿灯。' }
     : { title: '闯红灯', body: '红灯必须在白色停止线前完全停住，等绿灯再走。想右转也要先停稳，不能直接拐过去。' },
   turn_ban: (e) => ({ title: '这里禁止' + { left: '左转', right: '右转', through: '直行', uturn: '掉头' }[e.turn], body: '路口前挂着禁止' + { left: '左转', right: '右转', through: '直行', uturn: '掉头' }[e.turn] + '的牌子（红圈加斜杠），或者只准某个方向的白底黑箭头牌。进路口前看一眼路口右前方和红绿灯旁边的白色牌子；地上画了箭头的车道也只能按箭头走。要去那边就先直行，再从下一个路口绕回来。' }),
   stop_sign: () => ({ title: '没有在 STOP 前停车', body: 'STOP 标志前必须完全停住（速度归零），停在白色停止线前；没有停止线就停在人行横道前。左、右、再左看一遍，确认安全再走。' }),
@@ -33,10 +33,14 @@ export const EVENT_TEXT = {
   map_edge: () => ({ title: '到地图边界了', body: '已帮你掉头。' }),
   good_stop: () => ({ title: 'STOP 停得很标准', body: '' }),
   good_ror: () => ({ title: '红灯右转：先停稳再转，正确', body: '' }),
+  good_lor: () => ({ title: '单行道红灯左转：先停稳再转，正确', body: '新泽西允许从单行道左转进另一条单行道，和红灯右转一样要先停稳、让行。' }),
+  tailgate: (e) => ({ title: `跟车太近（只有 ${e.gap.toFixed(1)} 秒）`, body: '新泽西驾驶手册：和前车至少保持 3 秒。前车经过一棵树或一根电线杆时开始数，数到 3 你才到那里才对。下雨、天黑再多留。' }),
+  block_box: () => ({ title: '堵在路口里了', body: '前面的车堵着时不要开进路口，停在停止线前等，等对面有地方了再过。卡在路口中间会挡住横向的车（“Don\'t block the box”）。等对向空当左转时停在路口里是可以的。' }),
+  keep_right: () => ({ title: '一直开在最左边的车道', body: '高速上最左边的车道是超车道：超完车要回到右边。新泽西法律规定没在超车时不能一直占着左道。' }),
   good_turn: (e) => ({ title: (e.turn === 'left' ? '左转' : '右转') + '完成：打灯、车道都对', body: '' }),
 };
 export const EVENT_SHORT = {
-  red_light: '闯红灯', turn_ban: '违反禁止转弯', stop_sign: 'STOP 没停', rolling_stop: 'STOP 没停稳', over_line: '越过停止线', wrong_way: '单行道逆行', wrong_side: '压到对向车道', speeding: '超速',
+  red_light: '闯红灯', turn_ban: '违反禁止转弯', tailgate: '跟车太近', block_box: '堵路口', keep_right: '占用超车道', good_lor: '单行道红灯左转正确', stop_sign: 'STOP 没停', rolling_stop: 'STOP 没停稳', over_line: '越过停止线', wrong_way: '单行道逆行', wrong_side: '压到对向车道', speeding: '超速',
   no_yield: '没让有路权的车', no_yield_ped: '没礼让行人', hit_ped: '撞到行人', hit_car: '撞到别的车',
   no_signal: '转弯没打灯', late_signal: '打灯太晚', wrong_lane_from: '转弯起始车道不对', wrong_lane_into: '转弯后进错车道', lane_no_signal: '变道没打灯', crash: '碰撞', off_road: '开上人行道',
   good_lane: '变道规范', good_yield: '礼让行人', good_stop: 'STOP 完全停稳', good_ror: '红灯右转正确', good_turn: '转弯规范',
@@ -48,6 +52,7 @@ export const ALERT_TEXT = {
   ped: { icon: 'info', text: '前方斑马线有行人：停车，等人走过去', sub: '人在斑马线上或者正要踏上来，车都要停；停在斑马线前面，不要压上去' },
   car: { icon: 'info', text: '有车比你有路权：等它先走', sub: '你有 STOP、对方没有，就等对方过去；全向停车时谁先停稳谁先走' },
   inJ: { icon: 'info', text: '路口里有车：等它开出去', sub: '已经在路口里的车先走' },
+  close: { icon: 'info', text: '跟前车太近了：松点油门，留出 3 秒', sub: '前车经过一个路标时开始数“一千零一、一千零二、一千零三”，数完你才到那里' },
   oncoming: { icon: 'info', text: '左转要让对向直行的车', sub: '可以先把车头开进路口、摆正方向盘等着，对向没车了再转' },
 };
 export function hintText(h) {
@@ -60,7 +65,7 @@ export function hintText(h) {
       if (h.state === 'G') return { icon: 'G', text: '绿灯：可以通过', sub: '左转要让对向直行的车和过马路的行人；右转让行人' };
       if (h.state === 'Y') return { icon: 'Y', text: '黄灯：能安全停下就停', sub: '已经压到停止线或停不住时才继续通过，不要加速抢灯' };
       if (h.ntor) return { icon: 'R', text: near ? '红灯：停在停止线前。这个路口红灯不能右转' : '前方红灯：松油门，准备停车', sub: '灯旁边挂着 NO TURN ON RED（红灯禁止转弯）：右转也要等绿灯' };
-      return { icon: 'R', text: near ? '红灯：车头停在白色停止线前' : '前方红灯：松油门，准备停车', sub: '没有 NO TURN ON RED 牌子，可以红灯右转：先停稳，让左边来的车和斑马线上的人，再转。左转和直行等绿灯' };
+      return { icon: 'R', text: near ? '红灯：车头停在白色停止线前' : '前方红灯：松油门，准备停车', sub: '没有 NO TURN ON RED 牌子，可以红灯右转：先停稳，让左边来的车和斑马线上的人，再转。' + (h.lor ? '这里是单行道、左边也是单行道：停稳后也可以左转' : '左转和直行等绿灯') };
     case 'priority': return { icon: 'info', text: '这个路口你不用停，横向的车有 STOP', sub: '仍然松油门看一眼，对方不一定会让' };
   }
   return null;
@@ -104,3 +109,26 @@ export const SIGN_BOOK = [
 ];
 
 export const SHIFT_MSG = { need_brake: '先踩住刹车（S），才能从 P 挡换出来', need_stop: '车停稳了才能换这个挡' };
+
+/** 新泽西交规要点（照 NJ Driver Manual 写）。game：游戏里会判；false 的是现实里要知道、游戏里还没做的 */
+export const RULES_SHEET = [
+  { game: true, t: 'STOP 一定要完全停住', d: '车速归零，停在白线前；没有白线停在斑马线前。全向停车（ALL WAY）先到先走，同时到让右边的车。' },
+  { game: true, t: '红灯能不能转', d: '可以右转：先停稳、让车让人。单行道左转进单行道也可以。挂了 NO TURN ON RED 就不行。' },
+  { game: true, t: '黄灯', d: '能安全停下就停，不要加速抢灯。' },
+  { game: true, t: '斑马线上有人必须停', d: '不只是减速，要停住，等人走过你这半边路。' },
+  { game: true, t: '左转让对向直行', d: '绿灯（没有左转箭头）时，对向直行和右转的车先走。可以先开进路口等。' },
+  { game: true, t: '转弯、变道提前打灯', d: '转弯至少提前 100 英尺（约 30 米）。变道：看后视镜 → 打灯 → 回头看盲区 → 再变。' },
+  { game: true, t: '禁止转弯的牌子', d: '红圈加斜杠（禁止左转 / 右转 / 掉头），白底黑箭头加 ONLY（只准那个方向）。' },
+  { game: true, t: '跟车至少 3 秒', d: '前车经过路标时开始数，数到 3 你才到那里。' },
+  { game: true, t: '别堵路口', d: '前面堵着就停在停止线前，不要开进路口卡在中间。' },
+  { game: true, t: '限速', d: '居民区、商业区没牌子默认 25 mph；学校区挂牌时 25 mph。有牌子按牌子。' },
+  { game: true, t: '高速靠右', d: '最左边的车道只用来超车，超完回右边。上高速在匝道上加速到和车流差不多再并入。' },
+  { game: false, t: '校车停下、闪红灯、伸出 STOP 牌', d: '两个方向的车都要停，离校车至少 25 英尺，等红灯灭了再走。只有中间有隔离带的对向车道可以减速慢慢过。' },
+  { game: false, t: '救护车、警车、消防车鸣笛闪灯', d: '靠右边停下，等它过去。在路口里就先开出路口再靠边。' },
+  { game: false, t: 'Move Over（让出一条道）', d: '路边停着闪灯的警车、拖车、施工车：能换道就换到离它远的那条，换不了就明显减速。' },
+  { game: false, t: '铁路道口', d: '红灯闪、栏杆放下或者火车来了：停在离铁轨 15 到 50 英尺的地方。栏杆抬起来、灯灭了再走。' },
+  { game: false, t: '闪烁的信号灯', d: '黄灯闪：减速、小心通过。红灯闪：当 STOP 处理，要完全停住。' },
+  { game: false, t: '开雨刷就要开大灯', d: '新泽西法律：下雨开雨刷、起雾、看不到 500 英尺远、天黑，都要开大灯。' },
+  { game: false, t: '手机和安全带', d: '开车不能手拿手机（罚款几百美元，还扣分）。车里所有人都要系安全带。' },
+  { game: false, t: '停车的距离', d: '离消防栓 10 英尺、路口人行横道 25 英尺、STOP 牌 50 英尺内都不能停车。' },
+];

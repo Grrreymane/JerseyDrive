@@ -101,7 +101,8 @@ function botTurn(dir, opts = {}) {
     for (const l of j.legs) {
       if (!l.approach || l.segRef.useLen < 60) continue;
       if (opts.multiIn && (l.end === 'b' ? l.segRef.lf : l.segRef.lb) < 2) continue;
-      const r = j.legs.find(m => m !== l && m.exit && (-l.ox * m.oz + l.oz * m.ox) * dir > 0.9 && m.segRef.useLen > 50 && (!opts.multi || (m.end === 'a' ? m.segRef.lf : m.segRef.lb) >= 2));
+      if (opts.oneway !== undefined && !!l.segRef.oneway !== opts.oneway) continue;      // true：单行道进、单行道出；false：双向路进
+      const r = j.legs.find(m => m !== l && m.exit && (-l.ox * m.oz + l.oz * m.ox) * dir > 0.9 && m.segRef.useLen > 50 && (!opts.oneway || m.segRef.oneway) && (!opts.multi || (m.end === 'a' ? m.segRef.lf : m.segRef.lb) >= 2));
       if (r && clearPath(l, r, dir, opts) && skip-- <= 0) { pick = [j, l, r]; break; }
     }
     if (pick) break;
@@ -150,8 +151,25 @@ eq(botTurn(1, { noStop: true }), ['stop_sign'], 'STOP 不停直接右转');
 eq(botTurn(-1, { ctl: ['signal'], multi: true }), ['good_turn'], '绿灯左转进最左车道');
 eq(botTurn(-1, { ctl: ['signal'], multi: true, laneOut: 1 }), ['wrong_lane_into'], '左转进了外侧车道');
 eq(botTurn(1, { ctl: ['signal'], red: true, goRed: true }), ['good_ror', 'good_turn'], '红灯停稳后右转');
-eq(botTurn(-1, { ctl: ['signal'], red: true, goRed: true, skip: 1 }), ['red_light'], '红灯停稳后左转');
+eq(botTurn(-1, { ctl: ['signal'], red: true, goRed: true, oneway: false, skip: 1 }), ['red_light'], '双向路红灯停稳后左转');
+eq(botTurn(-1, { ctl: ['signal'], red: true, goRed: true, oneway: true }), ['good_lor', 'good_turn'], '单行道红灯停稳后左转进单行道（新泽西允许）');
 eq(botTurn(1, { ctl: ['signal'], red: true, noStop: true }), ['red_light'], '红灯不停直接右转');
 eq(botTurn(1, { ctl: ['signal', 'allway', 'stop'], multiIn: true, laneIn: 0 }), ['wrong_lane_from'], '从左车道右转');
 
+// 跟车太近：在一段长直路上，前面 0.9 秒处一直有一辆车（假车，跟着玩家走），应该记一次 tailgate
+{
+  const seg = map.segs.find(s => s.useLen > 220 && s.lf >= 1 && !s.high && Math.abs(Math.atan2(s.pz[s.n - 1] - s.pz[0], s.px[s.n - 1] - s.px[0]) - Math.atan2(s.pz[1] - s.pz[0], s.px[1] - s.px[0])) < 0.05);
+  if (!seg) ok(false, '跟车太近：没找到长直路');
+  else {
+    const car = place(seg, true, seg.useLen - 10), R = makeRules(), lead = { x: 0, z: 0, y: 0, h: 0, L: 4.6, W: 1.9, v: 9, mode: 'seg', seg, fwd: true, plan: null }, T = { cars: [lead], peds: [] }, evs = [];
+    car.v = 9;
+    for (let i = 0; i < 60 * 7; i++) {
+      stepCar(car, { throttle: car.v < 9 ? 0.4 : 0, brake: 0, steer: 0, analog: true }, 1 / 60);
+      const g = 9 * 0.9 + (CAR.L + lead.L) / 2, cx = car.x + Math.cos(car.h) * CAR.center, cz = car.z + Math.sin(car.h) * CAR.center;
+      lead.x = cx + Math.cos(car.h) * g; lead.z = cz + Math.sin(car.h) * g; lead.h = car.h; lead.v = car.v;
+      stepRules(R, car, map, i / 60, 1 / 60, T); evs.push(...R.events.map(e => e.type));
+    }
+    ok(evs.includes('tailgate'), '跟车太近（0.9 秒）→ tailgate  [' + [...new Set(evs)].join(',') + ']');
+  }
+}
 console.log(fail ? `\n${fail} 项失败` : '\n全部通过'); process.exit(fail ? 1 : 0);

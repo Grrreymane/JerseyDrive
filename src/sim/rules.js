@@ -6,9 +6,9 @@ import { threatsAt, playerContacts, pedAhead } from './traffic.js';
 export const PENALTY = {
   red_light: 20, stop_sign: 15, turn_ban: 15, rolling_stop: 10, wrong_way: 20, wrong_side: 10, crash: 20, off_road: 10,
   no_yield: 15, no_yield_ped: 15, hit_ped: 30, hit_car: 20,
-  speeding: 8, no_signal: 5, late_signal: 2, wrong_lane_from: 5, wrong_lane_into: 5, lane_no_signal: 4, over_line: 3,
+  speeding: 8, tailgate: 4, block_box: 8, keep_right: 3, no_signal: 5, late_signal: 2, wrong_lane_from: 5, wrong_lane_into: 5, lane_no_signal: 4, over_line: 3,
 };
-const SEV = { good_lane: 'good', good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor' };
+const SEV = { good_lane: 'good', good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_lor: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor', tailgate: 'minor', keep_right: 'minor' };
 
 export function makeRules() {
   return {
@@ -72,6 +72,22 @@ export function stepRules(R, car, map, t, dt, T = null) {
     // 为行人停过车，等人走了再走：记一次“礼让行人”
     if (R.alert === 'ped') { if (sp0 < 0.2) R.yieldStop = true; R.yieldSeen = t; }
     else if (R.yieldStop && t - R.yieldSeen > 0.4) { R.yieldStop = false; emit(R, 'good_yield', car, t, street); }
+    // 前车：同方向、同一条道上、离得最近的那辆
+    const hx = Math.cos(car.h), hz = Math.sin(car.h); let gapD = 1e9, lead = null;
+    for (const o of T.cars) {
+      const dx = o.x - c.x, dz = o.z - c.z; if (Math.abs(dx) > 70 || Math.abs(dz) > 70 || Math.abs((o.y || 0) - cy) > 2) continue;
+      const a = dx * hx + dz * hz, b = -dx * hz + dz * hx; if (a < 1 || a > 70 || Math.abs(b) > 1.7 || Math.cos(o.h - car.h) < 0.7) continue;
+      const g = a - (CAR.L + o.L) / 2; if (g < gapD) { gapD = g; lead = o; }
+    }
+    R.lead = lead; R.leadGap = gapD;
+    // 跟车距离：新泽西驾驶手册说至少 3 秒。不到 2 秒提醒，不到 1.2 秒连着 3 秒算违规（30 秒内只记一次）
+    const tGap = sp0 > 1 ? gapD / sp0 : 99;
+    if (sp0 * MPH > 15 && lead && tGap < 2 && !R.alert) R.alert = 'close';
+    if (sp0 * MPH > 15 && lead && tGap < 1.2) { R.closeT = (R.closeT || 0) + dt; if (R.closeT > 3 && t > (R.closeCool || 0)) { emit(R, 'tailgate', car, t, street, { gap: tGap }); R.closeCool = t + 30; R.closeT = 0; } }
+    else R.closeT = 0;
+    // 别堵路口：前面堵着还开进有红绿灯的路口、停在路口里面（等对向空当左转不算——那时前面没车挡着）
+    if (jc && jc.control === 'signal' && sp0 < 0.3 && lead && gapD < 8) { R.boxT = (R.boxT || 0) + dt; if (R.boxT > 2.5 && R.boxJ !== jc) { R.boxJ = jc; emit(R, 'block_box', car, t, street); } }
+    else { R.boxT = 0; if (!jc) R.boxJ = null; }
   }
   if (!map.onRoad(c.x, c.z, 0.3, cy)) {
     const dead = (loc.s < 1 && !seg.ja) || (loc.s > seg.len - 1 && !seg.jb);
@@ -102,7 +118,7 @@ export function stepRules(R, car, map, t, dt, T = null) {
       if (de < 16) A.minV = Math.min(A.minV, sp);
       if (sp < 0.12 && dl < 11 && de > -0.5) { if (!A.stopped) A.stopT = t; A.stopped = true; if (dl < -0.8) A.overLine = true; }
       if (de < 80) R.hint = j.control === 'signal'
-        ? { kind: 'signal', state: signalState(j, A.leg.group, t), d: dl, ntor: !!A.leg.ntor }
+        ? { kind: 'signal', state: signalState(j, A.leg.group, t), d: dl, ntor: !!A.leg.ntor, lor: !!(A.leg.segRef.oneway && A.exits && A.exits.some(e => e.type === 'left' && e.oneway && e.ok && !e.ban)) }
         : { kind: j.control === 'allway' ? 'allway' : 'stop', d: dl, stopped: A.stopped, inferred: j.inferred };
     } else if (A.leg && A.leg.approach && j.control === 'stop' && de < 60) R.hint = { kind: 'priority', d: de };
     if (A.exits && A.leg.approach && de < 110) R.preview = { j, exits: A.exits, de };
@@ -136,6 +152,11 @@ export function stepRules(R, car, map, t, dt, T = null) {
     } else {
       // ---- 路段上的持续检查 ----
       const li = laneInfo(seg, loc.o, fwd), moving = car.v > 0.8;
+      // 高速靠右：最左边那条道只用来超车。一直待在最左道、右边那条道前面又没车（不是在超车），30 秒提醒一次
+      if (/^(motorway|trunk)/.test(seg.cls) && li.side === 'ok' && li.n >= 2 && li.idx === 0 && car.v * MPH > 30) {
+        let passing = false; if (T) { const hx = Math.cos(car.h), hz = Math.sin(car.h); for (const o of T.cars) { const dx = o.x - c.x, dz = o.z - c.z, a = dx * hx + dz * hz, b = -dx * hz + dz * hx; if (a > -8 && a < 90 && b > LANE_W - 1.8 && b < LANE_W + 1.8 && Math.cos(o.h - car.h) > 0.7) { passing = true; break; } } }
+        R.leftT = passing ? 0 : (R.leftT || 0) + dt; if (R.leftT > 30) { emit(R, 'keep_right', car, t, street); R.leftT = -60; }
+      } else if ((R.leftT || 0) > 0) R.leftT = 0;
       if (moving && li.side === 'wrongway') { R.wrongT += dt; if (R.wrongT > 0.7 && !R.wrongActive) { emit(R, 'wrong_way', car, t, street); R.wrongActive = true; } }
       else if (li.side !== 'wrongway') { R.wrongT = 0; R.wrongActive = false; }
       if (moving && li.side === 'oncoming' && li.rel < -0.7) { R.sideT += dt; if (R.sideT > 1.2 && !R.sideActive) { emit(R, 'wrong_side', car, t, street); R.sideActive = true; } }
@@ -181,6 +202,7 @@ function finishJunction(R, E, seg, car, t) {
   const type = turnType(-E.leg.ox, -E.leg.oz, out.ox, out.oz), name = E.j.name;
   if (E.state === 'R' && E.stopped && !E.redDone) {
     if (type === 'right' && !E.leg.ntor) emit(R, 'good_ror', car, t, name);
+    else if (type === 'left' && E.seg.oneway && out.segRef.oneway && !E.leg.ntor) emit(R, 'good_lor', car, t, name);      // 新泽西：单行道左转进另一条单行道，停稳后红灯也可以
     else { emit(R, 'red_light', car, t, name, { afterStop: true, turn: type, ntor: !!E.leg.ntor }); E.viol = true; }      // 挂了 NO TURN ON RED 的进口，红灯右转也算闯红灯
   }
   if (E.th) {      // 绿灯左转要让对向直行；红灯右转要让横向来车

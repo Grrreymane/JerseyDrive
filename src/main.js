@@ -11,7 +11,7 @@ import { STYLES, setRamp, toonU } from './view/toon.js';
 import { buildCarView } from './view/carview.js';
 import { CAR_TYPES } from './view/models.js';
 import { signDataURL, shortName } from './view/signs.js';
-import { EVENT_TEXT, EVENT_SHORT, hintText, ALERT_TEXT, SIGN_BOOK, SHIFT_MSG } from './rulebook.js';
+import { EVENT_TEXT, EVENT_SHORT, hintText, ALERT_TEXT, SIGN_BOOK, SHIFT_MSG, RULES_SHEET } from './rulebook.js';
 import { makeAudio } from './view/audio.js';
 import { boardStart, boardEnd, boardTick, boardLeave, boardActive } from './board.js';
 import { LESSONS, lessonState } from './lessons.js';
@@ -396,7 +396,9 @@ function openBook() {
       if (s.cat) { html += (open ? '</div>' : '') + `<div class="cat">${s.cat}</div><div class="signs">`; open = true; continue; }
       html += `<div class="sign ${s.dark ? 'dark' : ''}"><img src="${signDataURL(s.id)}" alt="${s.en}"><div><b>${s.zh}</b><em>${s.en}</em><p>${s.tip}</p></div></div>`;
     }
-    $('bookBody').innerHTML = html + '</div>'; bookBuilt = true;
+    // 交规要点放最前面，标志在后面
+    const rules = '<div class="cat">新泽西交规要点</div><div class="rules">' + RULES_SHEET.map(r => `<div class="rule"><b>${r.t}</b><span class="tag ${r.game ? 'on' : ''}">${r.game ? '游戏里会判' : '游戏里还没有'}</span><p>${r.d}</p></div>`).join('') + '</div>';
+    $('bookBody').innerHTML = rules + html + '</div>'; bookBuilt = true;
   }
   show('pause', false); show('book', true); if (S.running) setPaused(true);
 }
