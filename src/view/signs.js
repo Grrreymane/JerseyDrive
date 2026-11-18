@@ -66,6 +66,8 @@ const D = {
     c.beginPath(); c.moveTo(0.5, 0.04); c.lineTo(0.94, 0.4); c.lineTo(0.94, 0.94); c.lineTo(0.06, 0.94); c.lineTo(0.06, 0.4); c.closePath(); c.fillStyle = FYG; c.fill(); c.lineWidth = 0.02; c.strokeStyle = BLK; c.stroke();
     person(c, 0.38, 0.62, 1.15); person(c, 0.64, 0.66, 0.85);
   },
+  school25(c) { plate(c, 0.14, 0.04, 0.72, 0.92, WHT, BLK); text(c, 'SPEED', 0.5, 0.15, 0.13); text(c, 'LIMIT', 0.5, 0.28, 0.13); text(c, '25', 0.5, 0.52, 0.3); text(c, 'WHEN CHILDREN', 0.5, 0.74, 0.075); text(c, 'ARE PRESENT', 0.5, 0.85, 0.075); },
+  endschool(c) { plate(c, 0.14, 0.12, 0.72, 0.76, WHT, BLK); text(c, 'END', 0.5, 0.3, 0.15); text(c, 'SCHOOL', 0.5, 0.5, 0.15); text(c, 'ZONE', 0.5, 0.7, 0.15); },
   signalahead(c) { diamond(c); c.fillStyle = BLK; rr(c, 0.4, 0.2, 0.2, 0.6, 0.03); c.fill();[['#e02020', 0.31], [YEL, 0.5], ['#19b34a', 0.69]].forEach(([k, y]) => { c.beginPath(); c.arc(0.5, y, 0.07, 0, 7); c.fillStyle = k; c.fill(); }); },
   stopahead(c) { diamond(c); octagon(c, 0.5, 0.6, 0.15); c.fillStyle = RED; c.fill(); arrow(c, 0.5, 0.42, 0.5, 0.18, 0.06, BLK, 2); },
   merge(c) {

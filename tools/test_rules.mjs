@@ -216,4 +216,69 @@ eq(botTurn(1, { ctl: ['signal', 'allway', 'stop'], multiIn: true, laneIn: 0 }), 
     if (seg.lf >= 3) { ev = runT(placeAt(seg, true, seg.trimA + 20, seg.lf - 3), mk(), 25, cruise(lim - 2)); ok(ev.includes('good_move_over'), `隔开一条道经过 → good_move_over  [${[...new Set(ev)]}]`); }
   }
 }
+// 掉头、高速倒车、高速太慢、学校区限速
+{
+  const { makeTraffic } = await import('../src/sim/traffic.js'), { markSchools, schoolAt } = await import('../src/sim/school.js'), { pointAt, segY } = await import('../src/sim/map.js');
+  markSchools(map, JSON.parse(fs.readFileSync(new URL('../data/schools.json', import.meta.url), 'utf8')).rows);
+  const placeAt = (seg, fwd, s, idx) => { const q = offsetPoint(seg, s, laneCenter(seg, fwd, idx), {}); const car = makeCar(); car.h = Math.atan2(q.dz, q.dx) + (fwd ? 0 : Math.PI); car.x = q.x - Math.cos(car.h) * CAR.center; car.z = q.z - Math.sin(car.h) * CAR.center; car.y = segY(seg, s); car.gear = 'D'; return car; };
+  const runT = (car, T, secs, ctl) => {
+    const R = makeRules(), evs = []; let t = 0;
+    for (let i = 0; i < secs * 60; i++) {
+      stepCar(car, { throttle: 0, brake: 0, steer: 0, analog: true, ...(ctl(car, R, t) || {}) }, 1 / 60);
+      stepRules(R, car, map, t, 1 / 60, T); evs.push(...R.events.map(e => e.type).filter(x => !/^good_(signal|lane)$/.test(x)));
+      if (R.needReset) { evs.push('RESET'); break; } t += 1 / 60;
+    }
+    return evs;
+  };
+  const bend = (seg, s) => { const P = {}; pointAt(seg, s, P); const h0 = Math.atan2(P.dz, P.dx); let m = 0; for (let q = Math.max(0, s - 150); q <= Math.min(seg.len, s + 150); q += 8) { pointAt(seg, q, P); let d = Math.abs(Math.atan2(P.dz, P.dx) - h0); if (d > Math.PI) d = 2 * Math.PI - d; m = Math.max(m, d); } return m * 57.3; };
+  // 掉头：慢慢开，方向盘打满往左，转过来以后回正
+  const uturn = (car, R, t) => { if (t < 1.5) return { throttle: car.v < 3 ? 0.3 : 0 }; const turned = Math.cos(car.h - car.h0) < -0.95; return turned ? { throttle: 0, brake: 0.5 } : { throttle: car.v < 2.5 ? 0.25 : 0, brake: car.v > 3.5 ? 0.3 : 0, steer: -1 }; };
+  const wide = map.segs.filter(s => !s.oneway && s.lf && s.lb && s.halfW > 7.2 && s.useLen > 80 && !/^(motorway|trunk)/.test(s.cls) && !s.high);
+  const straight = wide.find(s => bend(s, (s.trimA + s.len - s.trimB) / 2) < 8);
+  if (!straight) ok(true, '（没有够宽的直路测掉头，跳过）');
+  else {
+    const car = placeAt(straight, true, (straight.trimA + straight.len - straight.trimB) / 2 - 8, straight.lf - 1); car.h0 = car.h;
+    let ev = runT(car, makeTraffic(map, 3), 12, uturn);
+    ok(ev.includes('uturn_ok') && !ev.includes('wrong_side'), `直路中间、没车时掉头 → uturn_ok，不算压对向车道  [${[...new Set(ev)]}]`);
+    // 有车开过来时掉头
+    const T = makeTraffic(map, 3), s0 = (straight.trimA + straight.len - straight.trimB) / 2 - 8;
+    const car2 = placeAt(straight, true, s0, straight.lf - 1); car2.h0 = car2.h;
+    T.cars.push({ id: 901, kind: 'car', mode: 'seg', seg: straight, fwd: false, idx: 0, u: Math.max(0, straight.len - straight.trimB - (s0 + 30)), v: 9, L: 4.6, W: 1.85, off: 0, x: 0, z: 0, h: 0, y: 0 });
+    ev = runT(car2, T, 12, uturn);
+    ok(ev.includes('uturn_block'), `对向有车开过来还掉头 → uturn_block  [${[...new Set(ev)]}]`);
+  }
+  const curvy = wide.find(s => bend(s, (s.trimA + s.len - s.trimB) / 2) > 40);
+  if (!curvy) ok(true, '（没有够宽的弯路测弯道掉头，跳过）');
+  else {
+    const car = placeAt(curvy, true, (curvy.trimA + curvy.len - curvy.trimB) / 2 - 8, curvy.lf - 1); car.h0 = car.h;
+    const ev = runT(car, makeTraffic(map, 3), 12, uturn);
+    ok(ev.includes('uturn_curve'), `弯道附近掉头 → uturn_curve  [${[...new Set(ev)]}]`);
+  }
+  // 高速上倒车、开太慢
+  const hw = map.segs.find(s => s.cls === 'motorway' && s.useLen > 400 && !s.high) || map.segs.find(s => s.cls === 'motorway' && s.useLen > 400);
+  if (!hw) ok(true, '（这张图上没有够长的高速，跳过）');
+  else {
+    let car = placeAt(hw, true, hw.trimA + 60, hw.lf - 1); car.gear = 'R';
+    let ev = runT(car, makeTraffic(map, 3), 8, () => ({ throttle: 0.3 }));
+    ok(ev.includes('back_highway'), `高速上倒车 → back_highway  [${[...new Set(ev)]}]`);
+    // 沿车道开（纯追踪）
+    const keep = (mphOf) => (car, R, t) => { const q = offsetPoint(hw, (R.cur?.s ?? hw.trimA) + Math.max(12, car.v * 1.2), laneCenter(hw, true, hw.lf - 1), {}); const al = Math.atan2(q.z - car.z, q.x - car.x) - car.h, ld = Math.hypot(q.x - car.x, q.z - car.z); return { ...cruise(mphOf(t))(car), steer: Math.max(-1, Math.min(1, Math.atan(2 * 2.7 * Math.sin(al) / ld) / 0.61)) }; };
+    car = placeAt(hw, true, hw.trimA + 10, hw.lf - 1); car.v = (hw.speed - 5) / 2.237;
+    ev = runT(car, makeTraffic(map, 3), 30, keep(t => t < 4 ? hw.speed - 5 : 15));
+    ok(ev.includes('too_slow'), `高速上前面没车还只开 15 mph → too_slow  [${[...new Set(ev)]}]`);
+    car = placeAt(hw, true, hw.trimA + 10, hw.lf - 1); car.v = (hw.speed - 5) / 2.237;
+    ev = runT(car, makeTraffic(map, 3), 30, keep(() => hw.speed - 3));
+    ok(!ev.includes('too_slow'), `高速上正常开 → 不算太慢  [${[...new Set(ev)]}]`);
+  }
+  // 学校区：原来限速 35 的路，进了学校区按 25 算
+  const sz = map.segs.find(s => s.school && s.speed > 25 && s.lf && s.school.some(z => z.s1 - z.s0 > 80 && z.s0 - s.trimA > 30));
+  if (!sz) ok(true, '（这张图上没有限速高于 25 的学校区，跳过）');
+  else {
+    const z = sz.school.find(z => z.s1 - z.s0 > 80 && z.s0 - sz.trimA > 30);
+    const car = placeAt(sz, true, z.s0 - 25, sz.lf - 1); car.v = sz.speed / 2.237;
+    const R = makeRules(); let hit = null;
+    for (let i = 0; i < 6 * 60 && !hit; i++) { stepCar(car, { throttle: car.v * 2.237 < sz.speed - 1 ? 0.4 : 0, brake: 0, steer: 0, analog: true }, 1 / 60); stepRules(R, car, map, i / 60, 1 / 60, makeTraffic(map, 3)); hit = R.events.find(e => e.type === 'speeding'); if (R.needReset) break; }
+    ok(hit && hit.school && hit.limit === 25, `学校区里按原限速 ${sz.speed} 开 → 超速（学校区 25）  [${hit ? JSON.stringify({ limit: hit.limit, school: hit.school }) : '没判'}]`);
+  }
+}
 console.log(fail ? `\n${fail} 项失败` : '\n全部通过'); process.exit(fail ? 1 : 0);

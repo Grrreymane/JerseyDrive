@@ -5,6 +5,7 @@
 import { LANE_W, STOP_LINE, XWALK_NEAR, XWALK_FAR, CAR, offsetPoint, pointAt, laneCenter, turnType, signalState, obbOverlap, segY } from './map.js';
 import { MPH } from './car.js';
 import { stepRail } from './rail.js';
+import { limitAt } from './school.js';
 
 const N_CARS = 26, N_PEDS = 30, SPAWN_R = 240, KEEP_R = 320, PED_R = 150, PED_KEEP = 210, WALK = 1.35;
 const XW = (XWALK_NEAR + XWALK_FAR) / 2;
@@ -193,7 +194,7 @@ export function stepTraffic(T, pl, t, dt) {
   for (const c of cars) {
     if (c.hitT > 0) { c.hitT -= dt; c.v = 0; continue; }
     if (c.fixed) { c.v = 0; continue; }      // Move Over 那两辆：一直停着
-    const seg = c.seg; let vmax = seg.speed / MPH * 0.88, gap = 1e9, vcap = 1e9;
+    const seg = c.seg; let vmax = (seg.school ? limitAt(seg, sAbsOf(c)) : seg.speed) / MPH * 0.88, gap = 1e9, vcap = 1e9;
     const hx = Math.cos(c.h), hz = Math.sin(c.h), look = 40 + c.v * 2.2;
     // 前面有东西：g 是车头到它的空隙（已经减掉安全距离），vl 是它沿我方向的速度。
     // 它在动就跟着它的速度、留大约 1 秒车距；停着就按刹停距离算

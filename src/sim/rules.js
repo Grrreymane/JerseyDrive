@@ -1,5 +1,6 @@
 // 交规判定：每一步看车的位置和状态，产出事件（违规 / 做对了 / 提示）。纯逻辑。
-import { STOP_LINE, CAR, LANE_W, laneInfo, turnType, signalState } from './map.js';
+import { STOP_LINE, CAR, LANE_W, laneInfo, turnType, signalState, pointAt } from './map.js';
+import { limitAt, schoolAt } from './school.js';
 import { MPH, carCenter, carFront } from './car.js';
 import { threatsAt, playerContacts, pedAhead, sAbsOf } from './traffic.js';
 import { trainOnCrossing } from './rail.js';
@@ -8,8 +9,9 @@ export const PENALTY = {
   red_light: 20, stop_sign: 15, turn_ban: 15, rolling_stop: 10, wrong_way: 20, wrong_side: 10, crash: 20, off_road: 10,
   no_yield: 15, no_yield_ped: 15, hit_ped: 30, hit_car: 20,
   pass_bus: 25, no_yield_ems: 15, rail_run: 25, rail_stop: 10, hit_train: 40, no_move_over: 10, speeding: 8, tailgate: 4, block_box: 8, keep_right: 3, no_signal: 5, late_signal: 2, wrong_lane_from: 5, wrong_lane_into: 5, lane_no_signal: 4, over_line: 3,
+  uturn_highway: 20, uturn_curve: 10, uturn_block: 10, back_highway: 15, too_slow: 3,
 };
-const SEV = { good_lane: 'good', good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_lor: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor', tailgate: 'minor', keep_right: 'minor', good_bus: 'good', good_ems: 'good', good_rail: 'good', good_move_over: 'good', slow_move_over: 'good', rear_ended: 'info' };
+const SEV = { good_lane: 'good', good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_lor: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor', tailgate: 'minor', keep_right: 'minor', good_bus: 'good', good_ems: 'good', good_rail: 'good', good_move_over: 'good', slow_move_over: 'good', rear_ended: 'info', uturn_ok: 'info', too_slow: 'minor' };
 
 export function makeRules() {
   return {
@@ -18,7 +20,7 @@ export function makeRules() {
     lane: null, pendingInto: null, hint: null, preview: null, cur: null, needReset: null, good: 0,
   };
 }
-export function clearTransient(R) { R.phase = 'seg'; R.A = null; R.E = null; R.lane = null; R.pendingInto = null; R.wrongT = 0; R.sideT = 0; R.wrongActive = false; R.sideActive = false; R.hint = null; R.preview = null; }
+export function clearTransient(R) { R.phase = 'seg'; R.A = null; R.E = null; R.lane = null; R.pendingInto = null; R.wrongT = 0; R.sideT = 0; R.wrongActive = false; R.sideActive = false; R.hint = null; R.preview = null; R.ut = null; R.utDir = null; R.hwyFast = false; R.slowT = 0; R.backD = 0; }
 
 function emit(R, type, car, t, street, extra) {
   const sev = SEV[type] || 'bad';
@@ -145,6 +147,8 @@ export function stepRules(R, car, map, t, dt, T = null) {
     // 别堵路口：前面堵着还开进有红绿灯的路口、停在路口里面（等对向空当左转不算——那时前面没车挡着）
     if (jc && jc.control === 'signal' && sp0 < 0.3 && lead && gapD < 8) { R.boxT = (R.boxT || 0) + dt; if (R.boxT > 2.5 && R.boxJ !== jc) { R.boxJ = jc; emit(R, 'block_box', car, t, street); } }
     else { R.boxT = 0; if (!jc) R.boxJ = null; }
+    // 学校区：在区里或者快到了（40 米内），车速超过 24 mph 就提醒
+    if (!R.alert && seg.school && sp0 * MPH > 24 && seg.speed > 0) { const ahead = loc.s + (fwd ? 40 : -40); if (schoolAt(seg, loc.s) || schoolAt(seg, ahead)) R.alert = 'school'; }
   }
   if (!map.onRoad(c.x, c.z, 0.3, cy)) {
     const dead = (loc.s < 1 && !seg.ja) || (loc.s > seg.len - 1 && !seg.jb);
@@ -152,6 +156,21 @@ export function stepRules(R, car, map, t, dt, T = null) {
     else { emit(R, 'off_road', car, t, street); R.needReset = {}; }
     return;
   }
+
+  // 掉头（路段中间，不在路口里）。新泽西 39:4-125：弯道、坡顶前后看不清 500 英尺（约 150 米）的地方不准掉头，挂 NO U TURN 的地方不准；
+  // 39:4-127：掉头、倒车挡到别的车也不行。高速、快速路、匝道上不能掉头。双黄线本身不禁止掉头（它管的是不准越线超车）
+  const ang = Math.cos(car.h) * loc.dx + Math.sin(car.h) * loc.dz;
+  if (jc || seg.oneway) { R.ut = null; R.utDir = null; }
+  else if (Math.abs(ang) > 0.9) {
+    if (R.ut && R.ut.seg === seg && R.ut.fwd !== fwd && car.odo - R.ut.odo < 60) finishUturn(R, R.ut, seg, loc.s, car, t, street);
+    R.ut = null; R.utDir = { seg, fwd };
+  } else if (Math.abs(ang) < 0.7 && sp > 0.2) {
+    if (!R.ut && R.utDir && R.utDir.seg === seg) R.ut = { seg, fwd: R.utDir.fwd, s: loc.s, odo: car.odo, block: false };
+    if (R.ut && T && !R.ut.block) R.ut.block = uturnBlocks(T, seg, loc.s);
+  }
+  // 高速、匝道上倒车（错过出口往回倒）：倒了 4 米以上算违规，30 秒内只记一次
+  if (car.v < -0.3 && !jc && /^(motorway|trunk)/.test(seg.cls)) { R.backD = (R.backD || 0) - car.v * dt; if (R.backD > 4 && t > (R.backCool || 0)) { emit(R, 'back_highway', car, t, street); R.backCool = t + 30; R.backD = 0; } }
+  else if (car.v >= 0) R.backD = 0;
 
   if (R.phase === 'junc') {
     if (jc || jf) { if (jc && jc !== R.E.j) R.E = { j: jc, leg: null }; }
@@ -216,7 +235,8 @@ export function stepRules(R, car, map, t, dt, T = null) {
       } else if ((R.leftT || 0) > 0) R.leftT = 0;
       if (moving && li.side === 'wrongway') { R.wrongT += dt; if (R.wrongT > 0.7 && !R.wrongActive) { emit(R, 'wrong_way', car, t, street); R.wrongActive = true; } }
       else if (li.side !== 'wrongway') { R.wrongT = 0; R.wrongActive = false; }
-      if (moving && li.side === 'oncoming' && li.rel < -0.7) { R.sideT += dt; if (R.sideT > 1.2 && !R.sideActive) { emit(R, 'wrong_side', car, t, street); R.sideActive = true; } }
+      // 掉头时车横着（ang 小），不算开在对向车道上
+      if (moving && li.side === 'oncoming' && li.rel < -0.7 && Math.abs(ang) > 0.85) { R.sideT += dt; if (R.sideT > 1.2 && !R.sideActive) { emit(R, 'wrong_side', car, t, street); R.sideActive = true; } }
       else if (li.side !== 'oncoming') { R.sideT = 0; R.sideActive = false; }
 
       const P = R.pendingInto;
@@ -229,7 +249,7 @@ export function stepRules(R, car, map, t, dt, T = null) {
           }
           R.pendingInto = null; R.lane = { key, idx: li.idx };
         }
-      } else if (li.side === 'ok' && li.n >= 2) {
+      } else if (li.side === 'ok' && li.n >= 2 && Math.abs(ang) > 0.85) {      // 掉头横穿车道不算变道
         const L = R.lane;
         if (L && L.key === key) {
           const fp = li.rel / LANE_W;
@@ -244,9 +264,39 @@ export function stepRules(R, car, map, t, dt, T = null) {
     }
   }
   // 超速（路口里也算）
-  const mph = sp * MPH; R.speedCool -= dt;
-  if (mph > seg.speed + 3.5) { R.speedT += dt; if (R.speedT > 1.5 && R.speedCool <= 0) { emit(R, 'speeding', car, t, street, { limit: seg.speed, mph }); R.speedCool = 20; } }
+  const mph = sp * MPH, lim = seg.school ? limitAt(seg, loc.s) : seg.speed; R.speedCool -= dt;
+  if (mph > lim + 3.5) { R.speedT += dt; if (R.speedT > 1.5 && R.speedCool <= 0) { emit(R, 'speeding', car, t, street, { limit: lim, mph, school: !!(seg.school && schoolAt(seg, loc.s)) }); R.speedCool = 20; } }
   else R.speedT = 0;
+  // 高速上开太慢（39:4-97.1：不能慢到妨碍正常车流）：前面 90 米没车、没有要让的情况，比限速慢 20 mph 以上开了 12 秒（停在车道上算两倍）。
+  // 只在开起来过以后才算（刚上高速、刚被放回原地还在起步不算）
+  if (seg.cls === 'motorway' && !jc) {
+    if (mph > seg.speed - 15) R.hwyFast = true;
+    const free = !R.lead || R.leadGap > 90;
+    if (R.hwyFast && T && free && !R.alert && car.v >= 0 && mph < seg.speed - 20) R.slowT = (R.slowT || 0) + dt * (mph < 2 ? 2 : 1); else R.slowT = 0;
+    if (R.slowT > 12 && t > (R.slowCool || 0)) { emit(R, 'too_slow', car, t, street, { stop: mph < 2, limit: seg.speed }); R.slowCool = t + 60; R.slowT = 0; }
+  } else if (!jc) { R.hwyFast = false; R.slowT = 0; }
+}
+
+// 掉头途中，同一段路上有车开过来、4.5 秒内就到你这里：算挡到别的车
+function uturnBlocks(T, seg, s) {
+  for (const o of T.cars) {
+    if (o.mode !== 'seg' || o.seg !== seg || o.fixed || o.parked || o.v < 2) continue;
+    const d = (s - sAbsOf(o)) * (o.fwd ? 1 : -1); if (d > 0 && d < 70 && d / o.v < 4.5) return true;
+  }
+  return false;
+}
+// 前后 150 米（500 英尺）内路拐了多少度
+function bendNear(seg, s) {
+  const P = {}; pointAt(seg, s, P); const h0 = Math.atan2(P.dz, P.dx); let m = 0;
+  for (let q = Math.max(0, s - 150); q <= Math.min(seg.len, s + 150); q += 8) { pointAt(seg, q, P); let d = Math.abs(Math.atan2(P.dz, P.dx) - h0); if (d > Math.PI) d = 2 * Math.PI - d; m = Math.max(m, d); }
+  return m * 180 / Math.PI;
+}
+function finishUturn(R, U, seg, s, car, t, street) {
+  if (/^(motorway|trunk)/.test(seg.cls)) return emit(R, 'uturn_highway', car, t, street);
+  const bend = bendNear(seg, (U.s + s) / 2);
+  if (bend > 30) return emit(R, 'uturn_curve', car, t, street, { deg: bend });
+  if (U.block) return emit(R, 'uturn_block', car, t, street);
+  return emit(R, 'uturn_ok', car, t, street);
 }
 
 function finishJunction(R, E, seg, car, t) {

@@ -445,7 +445,18 @@ export function buildWorld(map, scene) {
   for (const s of segs) {
     if (s.useLen < 90 || s.high || ![20, 25, 35].includes(s.speed)) continue;
     const put = (sAt, sg) => { pointAt(s, sAt, P); const x = P.x - P.dz * (s.halfW + 0.9) * sg, z = P.z + P.dx * (s.halfW + 0.9) * sg; post(x, z, 2.7); board(Gs, x, 2.25, z, -P.dx * sg, -P.dz * sg, 0.85, 0.85, atlas.uv('speed' + s.speed)); backing(x, 2.25, z, -P.dx * sg, -P.dz * sg, 0.6, 0.76); };
-    put(s.trimA + 30, 1); if (s.lb > 0) put(s.len - s.trimB - 30, -1);
+    const inSchool = (q) => s.school && s.school.some(z => q > z.s0 - 10 && q < z.s1 + 10);      // 学校区的牌子上已经写了限速
+    if (!inSchool(s.trimA + 30)) put(s.trimA + 30, 1); if (s.lb > 0 && !inSchool(s.len - s.trimB - 30)) put(s.len - s.trimB - 30, -1);
+  }
+  // 学校区（真实学校旁边）：进区的地方立 SCHOOL 牌 + SPEED LIMIT 25 WHEN CHILDREN ARE PRESENT；原来限速更高的路，出区立 END SCHOOL ZONE
+  for (const s of segs) {
+    if (!s.school || s.high) continue;
+    const put = (sAt, sg, ids) => { pointAt(s, sAt, P); const x = P.x - P.dz * (s.halfW + 0.9) * sg, z = P.z + P.dx * (s.halfW + 0.9) * sg; post(x, z, ids.length > 1 ? 3.3 : 2.7); ids.forEach((id, k) => { const y = ids.length > 1 ? 2.9 - k * 0.82 : 2.25; board(Gs, x, y, z, -P.dx * sg, -P.dz * sg, 0.8, 0.8, atlas.uv(id)); backing(x, y, z, -P.dx * sg, -P.dz * sg, 0.62, 0.74); }); };
+    for (const zn of s.school) {
+      if (zn.s1 - zn.s0 < 35) continue;
+      if (s.lf > 0) { put(Math.max(zn.s0, s.trimA + 8), 1, ['school', 'school25']); if (s.speed > 25 && zn.s1 < s.len - s.trimB - 5) put(zn.s1, 1, ['endschool']); }
+      if (s.lb > 0) { put(Math.min(zn.s1, s.len - s.trimB - 8), -1, ['school', 'school25']); if (s.speed > 25 && zn.s0 > s.trimA + 5) put(zn.s0, -1, ['endschool']); }
+    }
   }
   });
   // 开局：对整张图空跑一遍标志这一遍（几何全丢掉），只为了登记占位和灯泡位置

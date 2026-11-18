@@ -6,6 +6,7 @@ import { buildActors } from './view/actors.js';
 import { buildSpecial } from './view/special.js';
 import { buildRailView } from './view/rail.js';
 import { makeRail } from './sim/rail.js';
+import { markSchools } from './sim/school.js';
 import { makeRules, stepRules, clearTransient, PENALTY } from './sim/rules.js';
 import { buildWorld } from './view/world.js';
 import { buildSky } from './view/sky.js';
@@ -128,6 +129,8 @@ try { const r = markTurnBans(map, (await (await fetch('data/turns.json')).json()
 // 铁路平交道口（OSM）：对到路段上，车流、规则、画面都看它
 let RL = null; try { RL = makeRail(map, (await (await fetch('data/rail.json')).json()).rows); console.info('铁路道口', RL.X.length, '个'); } catch { /* 文件缺了就当没有 */ }
 try { const miss = markNoTurnOnRed(map, (await (await fetch('data/ntor.json')).json()).rows); if (miss.length) console.info('NTOR 没对上：', miss.map(r => r.street || r.at).join('；')); } catch { /* 文件缺了就当没有 */ }
+// 学校区（OSM 学校旁边的路段，限速 25）：规则、车流、路边牌子都看它
+try { console.info('学校区', markSchools(map, (await (await fetch('data/schools.json')).json()).rows), '段'); } catch { /* 文件缺了就当没有 */ }
 const world = buildWorld(map, scene);
 // 水面（浅蓝，透明底），大地图和小地图都用
 let waterImg = null;
