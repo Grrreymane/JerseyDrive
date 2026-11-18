@@ -172,4 +172,48 @@ eq(botTurn(1, { ctl: ['signal', 'allway', 'stop'], multiIn: true, laneIn: 0 }), 
     ok(evs.includes('tailgate'), '跟车太近（0.9 秒）→ tailgate  [' + [...new Set(evs)].join(',') + ']');
   }
 }
+// 铁路道口、Move Over：要带上车流对象（只用它装道口和路边的警车，不跑别的车）
+{
+  const { makeRail, stepRail } = await import('../src/sim/rail.js'), { makeTraffic } = await import('../src/sim/traffic.js');
+  const RL = makeRail(map, JSON.parse(fs.readFileSync(new URL('../data/rail.json', import.meta.url), 'utf8')).rows);
+  const placeAt = (seg, fwd, s, idx) => { const q = offsetPoint(seg, s, laneCenter(seg, fwd, idx), {}); const car = makeCar(); car.h = Math.atan2(q.dz, q.dx) + (fwd ? 0 : Math.PI); car.x = q.x - Math.cos(car.h) * CAR.center; car.z = q.z - Math.sin(car.h) * CAR.center; car.gear = 'D'; return car; };
+  const runT = (car, T, secs, ctl) => {
+    const R = makeRules(), evs = []; let t = 0;
+    for (let i = 0; i < secs * 60; i++) {
+      stepCar(car, { throttle: 0, brake: 0, steer: 0, analog: true, ...(ctl(car, R, t) || {}) }, 1 / 60);
+      if (T.rail) stepRail(T.rail, { v: car.v, cur: R.cur }, t, 1 / 60, T.rnd);
+      stepRules(R, car, map, t, 1 / 60, T); evs.push(...R.events.map(e => e.type).filter(x => !/^good_(signal|lane)$/.test(x)));
+      if (R.needReset) break; t += 1 / 60;
+    }
+    return evs;
+  };
+  const reset = () => { for (const o of RL.X) { o.tau = -1; o.train = null; o.on = false; o.gate = 0; o.last = -1e9; o.rolled = -1e9; } RL.first = true; };
+  const x = RL.X.find(x => x.seg.lf && x.s - x.span - x.seg.trimA > 110);
+  if (!x) ok(true, '（这张图上没有能测的铁路道口，跳过）');
+  else {
+    const s0 = x.s - 105;
+    reset(); let T = makeTraffic(map, 1); T.rail = RL;
+    let ev = runT(placeAt(x.seg, true, s0, 0), T, 20, cruise(20));
+    ok(ev.includes('rail_run'), '道口红灯闪着照样开过去 → rail_run  [' + [...new Set(ev)] + ']');
+    reset(); T = makeTraffic(map, 1); T.rail = RL;
+    ev = runT(placeAt(x.seg, true, s0, 0), T, 75, (car, R) => {
+      const d = R.railD?.[x.id];
+      if (x.on && d != null && d > 0 && d < 8 + car.v * car.v / 5) return { brake: 0.6 };
+      return cruise(20)(car);
+    });
+    ok(ev.includes('good_rail') && !ev.includes('rail_run') && !ev.includes('hit_train'), '停在道口前等火车过去 → good_rail  [' + [...new Set(ev)] + ']');
+  }
+  // Move Over：找一段两条道以上、够长的路，前面 130 米右道上停一辆闪灯的警车
+  const segs = map.segs.filter(s => s.lf >= 2 && s.useLen > 220 && /^(primary|secondary|trunk)/.test(s.cls)), seg = segs.find(s => s.lf >= 3) || segs[0];
+  if (!seg) ok(true, '（这张图上没有能测 Move Over 的路，跳过）');
+  else {
+    const mk = () => { const T = makeTraffic(map, 2), u = 150, q = offsetPoint(seg, seg.trimA + u, laneCenter(seg, true, seg.lf - 1) + 1.05, {}); T.cars.push({ id: 900, kind: 'mo', fixed: true, mode: 'seg', seg, fwd: true, idx: seg.lf - 1, u, v: 0, L: 4.9, W: 1.95, off: 1.05, x: q.x, z: q.z, h: Math.atan2(q.dz, q.dx), y: 0 }); return T; };
+    const lim = seg.speed;
+    let ev = runT(placeAt(seg, true, seg.trimA + 20, seg.lf - 2), mk(), 25, cruise(lim - 2));
+    ok(ev.includes('no_move_over'), `紧挨着警车那条道、按限速开过去 → no_move_over  [${[...new Set(ev)]}]`);
+    ev = runT(placeAt(seg, true, seg.trimA + 20, seg.lf - 2), mk(), 30, cruise(lim - 14));
+    ok(ev.includes('slow_move_over'), `紧挨着警车、减速 14 mph 经过 → slow_move_over  [${[...new Set(ev)]}]`);
+    if (seg.lf >= 3) { ev = runT(placeAt(seg, true, seg.trimA + 20, seg.lf - 3), mk(), 25, cruise(lim - 2)); ok(ev.includes('good_move_over'), `隔开一条道经过 → good_move_over  [${[...new Set(ev)]}]`); }
+  }
+}
 console.log(fail ? `\n${fail} 项失败` : '\n全部通过'); process.exit(fail ? 1 : 0);

@@ -74,6 +74,14 @@ const D = {
   laneends(c) { diamond(c); c.strokeStyle = BLK; c.lineWidth = 0.045; c.beginPath(); c.moveTo(0.4, 0.78); c.lineTo(0.4, 0.22); c.moveTo(0.62, 0.78); c.lineTo(0.62, 0.56); c.lineTo(0.5, 0.36); c.lineTo(0.5, 0.22); c.stroke(); },
   twoway(c) { diamond(c); arrow(c, 0.4, 0.26, 0.4, 0.76, 0.07, BLK, 2); arrow(c, 0.6, 0.74, 0.6, 0.24, 0.07, BLK, 2); },
   deadend(c) { diamond(c); text(c, 'DEAD', 0.5, 0.43, 0.15); text(c, 'END', 0.5, 0.59, 0.15); },
+  xbuck(c) {      // 铁路道口的白色叉形牌（RAILROAD / CROSSING）
+    c.save(); c.translate(0.5, 0.5);
+    for (const [a, w1, w2] of [[-Math.PI / 4, 'RAIL', 'ROAD'], [Math.PI / 4, 'CROSS', 'ING']]) {
+      c.save(); c.rotate(a); rr(c, -0.49, -0.09, 0.98, 0.18, 0.02); c.fillStyle = WHT; c.fill(); c.lineWidth = 0.014; c.strokeStyle = BLK; c.stroke();
+      text(c, w1, -0.27, 0.006, 0.12); text(c, w2, 0.27, 0.006, 0.12); c.restore();
+    }
+    c.restore();
+  },
   rr(c) { c.beginPath(); c.arc(0.5, 0.5, 0.46, 0, 7); c.fillStyle = YEL; c.fill(); c.lineWidth = 0.02; c.strokeStyle = BLK; c.stroke(); c.lineWidth = 0.07; c.beginPath(); c.moveTo(0.18, 0.18); c.lineTo(0.82, 0.82); c.moveTo(0.82, 0.18); c.lineTo(0.18, 0.82); c.stroke(); text(c, 'R', 0.26, 0.5, 0.2); text(c, 'R', 0.74, 0.5, 0.2); },
   stophere(c) { plate(c, 0.14, 0.04, 0.72, 0.92, WHT, BLK); text(c, 'STOP', 0.5, 0.17, 0.15); text(c, 'HERE', 0.5, 0.33, 0.15); text(c, 'ON', 0.5, 0.49, 0.15); text(c, 'RED', 0.5, 0.65, 0.15, RED); arrow(c, 0.62, 0.74, 0.38, 0.9, 0.05, BLK, 2); },
   // 路面箭头（白色，贴在地上）

@@ -4,6 +4,8 @@ import { makeCar, stepCar, setSignal, shift, carCenter, MPH, GEARS } from './sim
 import { makeTraffic, stepTraffic } from './sim/traffic.js';
 import { buildActors } from './view/actors.js';
 import { buildSpecial } from './view/special.js';
+import { buildRailView } from './view/rail.js';
+import { makeRail } from './sim/rail.js';
 import { makeRules, stepRules, clearTransient, PENALTY } from './sim/rules.js';
 import { buildWorld } from './view/world.js';
 import { buildSky } from './view/sky.js';
@@ -123,6 +125,8 @@ const map = prepareMap(raw);
 // 禁止红灯右转的路口（有出处的那些）：标到进口上，规则、标志、教练提示都看它
 // 禁止左转 / 掉头 / 只准直行……（OSM 的转向限制）：标到进口上，规则、标志、车流、导航都看它
 try { const r = markTurnBans(map, (await (await fetch('data/turns.json')).json()).rows); console.info('转向限制：对上', r.ok, '条，没对上', r.miss, '条'); } catch { /* 文件缺了就当没有 */ }
+// 铁路平交道口（OSM）：对到路段上，车流、规则、画面都看它
+let RL = null; try { RL = makeRail(map, (await (await fetch('data/rail.json')).json()).rows); console.info('铁路道口', RL.X.length, '个'); } catch { /* 文件缺了就当没有 */ }
 try { const miss = markNoTurnOnRed(map, (await (await fetch('data/ntor.json')).json()).rows); if (miss.length) console.info('NTOR 没对上：', miss.map(r => r.street || r.at).join('；')); } catch { /* 文件缺了就当没有 */ }
 const world = buildWorld(map, scene);
 // 水面（浅蓝，透明底），大地图和小地图都用
@@ -135,10 +139,10 @@ if (world.waterCanvas) {
 // 导航画面：一张画布，既贴在车里的中控屏上，也给车外视角的圆形小地图用
 const nav = document.createElement('canvas'); nav.width = 640; nav.height = 380;
 const view = buildCarView(scene, renderer, nav); carView = view; applyCar();
-const actors = buildActors(scene), special = buildSpecial(scene);
+const actors = buildActors(scene), special = buildSpecial(scene), railView = RL && buildRailView(scene, RL);
 // 车流和行人（地址加 ?empty 关掉，空城练习）
 const trafficOn = !params.has('empty') && !(params.has('spot') && !params.has('traffic')) && !params.has('bench');
-let T = makeTraffic(map);
+let T = makeTraffic(map); T.rail = RL;
 const audio = makeAudio();
 
 // ---------- 状态 ----------
@@ -180,7 +184,7 @@ function cleanStep() {
   boardTick(S.clean);
 }
 addEventListener('pagehide', () => boardLeave(S.clean));
-function restart() { if (ready) clearRoute(); endClean(); S.crash = null; $('hit').classList.remove('on'); S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; T = makeTraffic(map); placeCar(startPose); $('toasts').innerHTML = ''; }
+function restart() { if (ready) clearRoute(); endClean(); S.crash = null; $('hit').classList.remove('on'); S.car = makeCar(); S.R = makeRules(); S.t = 0; S.driveTime = 0; T = makeTraffic(map); T.rail = RL; placeCar(startPose); $('toasts').innerHTML = ''; }
 restart();
 
 // ---------- 输入 ----------
@@ -410,7 +414,7 @@ function resize() {
 addEventListener('resize', resize); resize();
 
 const PC = {};
-function stepActors(dt) { const c = S.car, A = S.R.A; carCenter(c, PC); stepTraffic(T, { x: PC.x, z: PC.z, y: c.y || 0, h: c.h, v: c.v, cur: S.R.cur, stopT: A && A.stopped ? A.stopT : -1 }, S.t, dt); }
+function stepActors(dt) { const c = S.car, A = S.R.A; carCenter(c, PC); stepTraffic(T, { x: PC.x, z: PC.z, y: c.y || 0, h: c.h, v: c.v, sig: c.signal, cur: S.R.cur, stopT: A && A.stopped ? A.stopT : -1 }, S.t, dt); }
 function simStep(lookT) {
   stepCar(S.car, inp, DT);
   if (trafficOn) stepActors(DT);
@@ -420,10 +424,10 @@ function simStep(lookT) {
   lessonSim();
   if (S.R.needReset) {
     // 撞了：先停在原地 1.7 秒（泛红、闷响、被撞的人倒地、被撞的车打双闪），再退回去
-    const hit = S.R.events.find(e => e.type === 'crash' || e.type === 'hit_car' || e.type === 'hit_ped');
+    const hit = S.R.events.find(e => e.type === 'crash' || e.type === 'hit_car' || e.type === 'hit_ped' || e.type === 'hit_train');
     if (hit) {
       S.crash = { t: 1.7, reset: S.R.needReset }; S.R.needReset = null; S.car.v = 0; audio.crash(hit.type !== 'hit_ped');
-      $('hitMsg').textContent = hit.type === 'hit_ped' ? '撞到行人' : hit.type === 'hit_car' ? '撞车了' : '碰到停着的车'; $('hit').classList.add('on');
+      $('hitMsg').textContent = hit.type === 'hit_train' ? '被火车撞了' : hit.type === 'hit_ped' ? '撞到行人' : hit.type === 'hit_car' ? '撞车了' : '碰到停着的车'; $('hit').classList.add('on');
       return;
     }
     doReset();
@@ -431,9 +435,11 @@ function simStep(lookT) {
 }
 function doReset() {
   {
-    const flip = S.R.needReset.flip, c = S.car, back = S.R.needReset.back ? 9 : 0;      // 撞了车或人：退回去 9 米，并把贴得太近的车清掉
+    const flip = S.R.needReset.flip, c = S.car, back = typeof S.R.needReset.back === 'number' ? S.R.needReset.back : S.R.needReset.back ? 9 : 0;      // 撞了车或人：退回去 9 米（被火车撞退到道口外），并把贴得太近的车清掉
     const p = map.snapToLane(c.x + Math.cos(c.h) * (CAR.center - back), c.z + Math.sin(c.h) * (CAR.center - back), c.h + (flip ? Math.PI : 0), c.y || 0) || startPose;
     if (back) T.cars = T.cars.filter(o => Math.hypot(o.x - p.x, o.z - p.z) > 16);
+    // 后面 50 米内同方向开过来的车先慢下来（玩家是停着放回去的，不然会被追尾）
+    if (back) for (const o of T.cars) { const dx = p.x - o.x, dz = p.z - o.z, a = dx * Math.cos(o.h) + dz * Math.sin(o.h); if (a > 0 && a < 50 && Math.abs(-dx * Math.sin(o.h) + dz * Math.cos(o.h)) < 3) o.v = Math.min(o.v, 3); }
     placeCar(p); const f = $('flash'); f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on')));
   }
 }
@@ -479,6 +485,7 @@ function tick(now) {
   sky.update(view.camera, S.car.x, S.car.z, (frame & 1) === 0);
   if (trafficOn) { actors.update(T, S.t); special.update(T, S.t); }
   audio.siren(trafficOn && S.running && !S.paused ? special.sirenDist(T, S.car.x, S.car.z) : 1e9);
+  if (railView) { const snd = railView.update(S.t, S.car.x, S.car.z); if (S.running && !S.paused) { audio.bell(snd.bell); for (const h of snd.horns) audio.trainHorn(h.d, h.long); } }
   view.renderMirrors(); post.render(scene, view.camera);
   frame++; requestAnimationFrame(tick);
 }
@@ -504,7 +511,7 @@ requestAnimationFrame(tick);
 
 // 调试钩子
 window.__jd = {
-  S, map, view, world, scene, renderer, inp, keys, sky, post, applyStyle, STYLES,
+  S, map, view, world, scene, renderer, inp, keys, sky, post, applyStyle, STYLES, RL, get T() { return T; },
   teleport(x, z, h) { placeCar({ x, z, h: h ?? S.car.h }); },
   step(n = 1, input) { if (input) Object.assign(inp, input); for (let i = 0; i < n; i++) simStep(); },
   /** 调试：把车摆到第 n 个满足条件的路口进口前 dist 米 */
@@ -534,7 +541,7 @@ window.__jd = {
     return { pts, len: d };
   },
   fly(v = 9, total = 300, bench = false) { const r = window.__jd.route(total); renderer.info.autoReset = false; S.fly = { ...r, d: 0, v, ft: bench ? [] : null, calls: 0, tris: 0 }; },
-  render() { world.updateLod(S.car.x, S.car.z); world.updateSignals(S.t); if (trafficOn) { actors.update(T, S.t); special.update(T, S.t); } view.update(S.car, lookT, 0.016); updateHud(); drawMini(); sky.update(view.camera, S.car.x, S.car.z); view.renderMirrors(); post.render(scene, view.camera); },
+  render() { world.updateLod(S.car.x, S.car.z); world.updateSignals(S.t); if (trafficOn) { actors.update(T, S.t); special.update(T, S.t); } if (railView) railView.update(S.t, S.car.x, S.car.z); view.update(S.car, lookT, 0.016); updateHud(); drawMini(); sky.update(view.camera, S.car.x, S.car.z); view.renderMirrors(); post.render(scene, view.camera); },
   /** 调试：把镜头固定在一个位置看向一个点 */
   lookFrom(px, py, pz, tx, ty, tz) {
     $('hud').style.display = 'none'; const c = view.camera;

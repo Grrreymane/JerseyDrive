@@ -50,6 +50,11 @@ export function makeAudio() {
     }
     if (sir) sir.g.gain.setTargetAtTime(vol, ctx.currentTime, 0.2);
   };
+  // 道口的铃：叮、叮……音量按离道口的距离
+  let dingT = 0;
+  A.bell = (dist) => { if (!ctx || dist > 180) return; const now = ctx.currentTime; if (now - dingT < 0.5) return; dingT = now; const v = 0.05 * Math.min(1, (180 - dist) / 140); beep(1320, 0.35, v, 'triangle'); beep(2640, 0.2, v * 0.4, 'sine'); };
+  // 火车汽笛：两个低音和在一起
+  A.trainHorn = (dist, long) => { if (!ctx || dist > 700) return; const v = 0.07 * Math.min(1, (700 - dist) / 500), d = long ? 1.6 : 0.6; for (const f of [311, 370, 466]) { const o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime; o.type = 'sawtooth'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.08); g.gain.setValueAtTime(v, t + d - 0.15); g.gain.exponentialRampToValueAtTime(0.0001, t + d); const fl = ctx.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = 1400; o.connect(fl).connect(g).connect(ctx.destination); o.start(t); o.stop(t + d + 0.05); } };
   A.horn = () => { beep(420, 0.45, 0.1, 'sawtooth'); beep(520, 0.45, 0.08, 'sawtooth'); };
   return A;
 }
