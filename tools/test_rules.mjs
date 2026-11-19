@@ -1,6 +1,6 @@
 // 机器人沿车道开过路口，检查交规判定。用法：npm test
 import fs from 'fs';
-import { prepareMap, laneCenter, offsetPoint, signalState, CAR, STOP_LINE } from '../src/sim/map.js';
+import { prepareMap, laneCenter, offsetPoint, signalState, CAR, STOP_LINE, solidFrom } from '../src/sim/map.js';
 import { makeCar, stepCar } from '../src/sim/car.js';
 import { makeRules, stepRules, clearTransient } from '../src/sim/rules.js';
 
@@ -269,6 +269,21 @@ eq(botTurn(1, { ctl: ['signal', 'allway', 'stop'], multiIn: true, laneIn: 0 }), 
     car = placeAt(hw, true, hw.trimA + 10, hw.lf - 1); car.v = (hw.speed - 5) / 2.237;
     ev = runT(car, makeTraffic(map, 3), 30, keep(() => hw.speed - 3));
     ok(!ev.includes('too_slow'), `高速上正常开 → 不算太慢  [${[...new Set(ev)]}]`);
+  }
+  // 变道：快到路口白实线那段变道 → lane_solid；虚线那段打灯变道没事
+  const lc = map.segs.find(s => s.lf >= 2 && !s.nomark && s.useLen > 120 && solidFrom(s, true) !== null && !s.high && !/^(motorway|trunk)/.test(s.cls));
+  if (!lc) ok(true, '（没有两条道以上、通到路口的路测变道，跳过）');
+  else {
+    const m = solidFrom(lc, true);
+    const chg = (at) => (car, R) => { car.signal = 1; const s = R.cur?.s ?? m - 45; if (s > m + 16) return { throttle: 0, brake: 1 };
+      const q = offsetPoint(lc, s + Math.max(8, car.v), laneCenter(lc, true, s > at ? 1 : 0), {}); const al = Math.atan2(q.z - car.z, q.x - car.x) - car.h, ld = Math.hypot(q.x - car.x, q.z - car.z);
+      return { ...cruise(15)(car), steer: Math.max(-1, Math.min(1, Math.atan(2 * 2.7 * Math.sin(al) / ld) / 0.61)) }; };
+    let car = placeAt(lc, true, m - 45, 0); car.v = 6;
+    let ev = runT(car, makeTraffic(map, 3), 14, chg(m + 1));
+    ok(ev.includes('lane_solid'), `快到路口跨白实线变道 → lane_solid  [${[...new Set(ev)]}]`);
+    car = placeAt(lc, true, m - 45, 0); car.v = 6;
+    ev = runT(car, makeTraffic(map, 3), 14, chg(m - 35));
+    ok(!ev.includes('lane_solid') && !ev.includes('lane_no_signal'), `虚线那段打灯变道 → 不扣分  [${[...new Set(ev)]}]`);
   }
   // 学校区：原来限速 35 的路，进了学校区按 25 算
   const sz = map.segs.find(s => s.school && s.speed > 25 && s.lf && s.school.some(z => z.s1 - z.s0 > 80 && z.s0 - s.trimA > 30));

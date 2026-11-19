@@ -1,6 +1,6 @@
 // 把路网变成 three.js 场景：地面、路面、标线、路缘、建筑、树、停着的车、红绿灯、标志。
 import * as THREE from 'three';
-import { LANE_W, XWALK_NEAR, XWALK_FAR, STOP_LINE, pointAt, offsetPoint, segY, signalState, hash, turnType } from '../sim/map.js';
+import { LANE_W, XWALK_NEAR, XWALK_FAR, STOP_LINE, pointAt, offsetPoint, segY, signalState, hash, turnType, solidFrom } from '../sim/map.js';
 import { makeSignAtlas, makeNameAtlas } from './signs.js';
 import { Geo, CellGeo, lin } from './geo.js';
 import { carModel, carModelLow, CAR_TYPES, pickCarType, treeModel, treePit, TREE_KINDS, lampPost, hydrant } from './models.js';
@@ -171,9 +171,11 @@ export function buildWorld(map, scene) {
       const legA = map.legOf(s.ja, s, 'a'), legB = map.legOf(s.jb, s, 'b');
       const xa = ctl(s.ja) && room, xb = ctl(s.jb) && room;
       const a0 = s0 + (xa ? STOP_LINE + 0.6 : 0), b0 = s1 - (xb ? STOP_LINE + 0.6 : 0);
-      if (s.lb > 0) { strip(Gy, s, a0, b0, s.cOff - 0.2, s.cOff - 0.07, 0, Y); strip(Gy, s, a0, b0, s.cOff + 0.07, s.cOff + 0.2, 0, Y); }
-      for (let k = 1; k < s.lf; k++) { const o = s.cOff + k * LANE_W, m = Math.max(a0, b0 - 24); dashed(Gw, s, a0, m, o, 0.13, 0, W); strip(Gw, s, m, b0, o - 0.07, o + 0.07, 0, W); }
-      for (let k = 1; k < s.lb; k++) { const o = s.cOff - k * LANE_W, m = Math.min(b0, a0 + 24); strip(Gw, s, a0, m, o - 0.07, o + 0.07, 0, W); dashed(Gw, s, m, b0, o, 0.13, 0, W); }
+      // 中线双黄、同方向车道之间白虚线，快到路口变白实线（solidFrom）。OSM 标了 lane_markings=no 的路（窄的住宅街）不画线
+      const mf = solidFrom(s, true), mb = solidFrom(s, false);
+      if (s.lb > 0 && !s.nomark) { strip(Gy, s, a0, b0, s.cOff - 0.2, s.cOff - 0.07, 0, Y); strip(Gy, s, a0, b0, s.cOff + 0.07, s.cOff + 0.2, 0, Y); }
+      if (!s.nomark) for (let k = 1; k < s.lf; k++) { const o = s.cOff + k * LANE_W, m = mf === null ? b0 : Math.min(b0, Math.max(a0, mf)); dashed(Gw, s, a0, m, o, 0.13, 0, W); strip(Gw, s, m, b0, o - 0.07, o + 0.07, 0, W); }
+      if (!s.nomark) for (let k = 1; k < s.lb; k++) { const o = s.cOff - k * LANE_W, m = mb === null ? a0 : Math.max(a0, Math.min(b0, mb)); strip(Gw, s, a0, m, o - 0.07, o + 0.07, 0, W); dashed(Gw, s, m, b0, o, 0.13, 0, W); }
       // 停止线
       if (xb && legB.approach && (s.jb.control === 'signal' || legB.stop)) strip(Gw, s, s1 - STOP_LINE - 0.45, s1 - STOP_LINE, s.lb > 0 ? s.cOff + 0.15 : -s.halfW + 0.2, s.halfW - 0.2, 0, W);
       if (xa && legA.approach && (s.ja.control === 'signal' || legA.stop)) strip(Gw, s, s0 + STOP_LINE, s0 + STOP_LINE + 0.45, -s.halfW + 0.2, s.cOff - 0.15, 0, W);

@@ -1,5 +1,5 @@
 // 交规判定：每一步看车的位置和状态，产出事件（违规 / 做对了 / 提示）。纯逻辑。
-import { STOP_LINE, CAR, LANE_W, laneInfo, turnType, signalState, pointAt } from './map.js';
+import { STOP_LINE, CAR, LANE_W, laneInfo, turnType, signalState, pointAt, solidAt } from './map.js';
 import { limitAt, schoolAt } from './school.js';
 import { MPH, carCenter, carFront } from './car.js';
 import { threatsAt, playerContacts, pedAhead, sAbsOf } from './traffic.js';
@@ -8,10 +8,10 @@ import { trainOnCrossing } from './rail.js';
 export const PENALTY = {
   red_light: 20, stop_sign: 15, turn_ban: 15, rolling_stop: 10, wrong_way: 20, wrong_side: 10, crash: 20, off_road: 10,
   no_yield: 15, no_yield_ped: 15, hit_ped: 30, hit_car: 20,
-  pass_bus: 25, no_yield_ems: 15, rail_run: 25, rail_stop: 10, hit_train: 40, no_move_over: 10, speeding: 8, tailgate: 4, block_box: 8, keep_right: 3, no_signal: 5, late_signal: 2, wrong_lane_from: 5, wrong_lane_into: 5, lane_no_signal: 4, over_line: 3,
+  pass_bus: 25, no_yield_ems: 15, rail_run: 25, rail_stop: 10, hit_train: 40, no_move_over: 10, speeding: 8, tailgate: 4, block_box: 8, keep_right: 3, no_signal: 5, late_signal: 2, wrong_lane_from: 5, wrong_lane_into: 5, lane_no_signal: 4, lane_solid: 2, over_line: 3,
   uturn_highway: 20, uturn_curve: 10, uturn_block: 10, back_highway: 15, too_slow: 3,
 };
-const SEV = { good_lane: 'good', good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_lor: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor', tailgate: 'minor', keep_right: 'minor', good_bus: 'good', good_ems: 'good', good_rail: 'good', good_move_over: 'good', slow_move_over: 'good', rear_ended: 'info', uturn_ok: 'info', too_slow: 'minor' };
+const SEV = { good_lane: 'good', good_signal: 'info', good_yield: 'good', good_stop: 'good', good_ror: 'good', good_lor: 'good', good_turn: 'good', map_edge: 'info', late_signal: 'minor', over_line: 'minor', tailgate: 'minor', keep_right: 'minor', good_bus: 'good', good_ems: 'good', good_rail: 'good', good_move_over: 'good', slow_move_over: 'good', rear_ended: 'info', uturn_ok: 'info', too_slow: 'minor', lane_solid: 'minor' };
 
 export function makeRules() {
   return {
@@ -236,7 +236,7 @@ export function stepRules(R, car, map, t, dt, T = null) {
       if (moving && li.side === 'wrongway') { R.wrongT += dt; if (R.wrongT > 0.7 && !R.wrongActive) { emit(R, 'wrong_way', car, t, street); R.wrongActive = true; } }
       else if (li.side !== 'wrongway') { R.wrongT = 0; R.wrongActive = false; }
       // 掉头时车横着（ang 小），不算开在对向车道上
-      if (moving && li.side === 'oncoming' && li.rel < -0.7 && Math.abs(ang) > 0.85) { R.sideT += dt; if (R.sideT > 1.2 && !R.sideActive) { emit(R, 'wrong_side', car, t, street); R.sideActive = true; } }
+      if (moving && li.side === 'oncoming' && li.rel < -0.7 && Math.abs(ang) > 0.85) { R.sideT += dt; if (R.sideT > 1.2 && !R.sideActive) { emit(R, 'wrong_side', car, t, street, { nomark: !!seg.nomark }); R.sideActive = true; } }
       else if (li.side !== 'oncoming') { R.sideT = 0; R.sideActive = false; }
 
       const P = R.pendingInto;
@@ -256,6 +256,7 @@ export function stepRules(R, car, map, t, dt, T = null) {
           if (fp > L.idx + 1.12 || fp < L.idx - 0.12) {
             const dir = li.idx > L.idx ? 1 : -1;
             if (moving && car.signal !== dir) emit(R, 'lane_no_signal', car, t, street, { dir });
+            else if (moving && !seg.nomark && solidAt(seg, fwd, loc.s)) emit(R, 'lane_solid', car, t, street, { dir });      // 快到路口跨白实线变道
             else if (moving) emit(R, 'good_lane', car, t, street, { dir });
             L.idx = li.idx;
           }

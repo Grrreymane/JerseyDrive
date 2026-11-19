@@ -51,6 +51,14 @@ export function laneInfo(seg, o, fwd) {
   if (idx >= n) return { side: 'park', idx: n - 1, n, rel };
   return { side: 'ok', idx, n, rel };
 }
+// 同方向车道之间的线：快到路口那 SOLID_LEN 米画白实线（不鼓励变道，MUTCD 3B.04），别处白虚线。路段中间切开的地方（joint）不算路口
+export const SOLID_LEN = 24;
+/** 同方向车道线从哪里开始变成实线（往前开的：s 大于它是实线；往回开的：s 小于它是实线）；这头不是路口就 null */
+export function solidFrom(seg, fwd) {
+  const j = fwd ? seg.jb : seg.ja; if (!j || j.control === 'joint') return null;
+  return fwd ? seg.len - seg.trimB - SOLID_LEN : seg.trimA + SOLID_LEN;
+}
+export const solidAt = (seg, fwd, s) => { const m = solidFrom(seg, fwd); return m !== null && (fwd ? s > m : s < m); };
 export const laneCenter = (seg, fwd, idx) => fwd ? seg.cOff + (idx + 0.5) * LANE_W : seg.cOff - (idx + 0.5) * LANE_W;
 
 /** 从 din 方向开进、dout 方向开出，算转弯类型 */
