@@ -14,7 +14,7 @@ const P = {}, Q = {};
 
 export function makeTraffic(map, seed = 12345) {
   let s = seed >>> 0 || 1; const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-  return { map, rnd, cars: [], peds: [], nextId: 1, tick: 0, emsT: 75, moT: 100 };
+  return { map, rnd, cars: [], peds: [], nextId: 1, tick: 0, emsT: 240, moT: 100 };
 }
 
 const useLane = (seg, fwd) => fwd ? seg.lf : seg.lb;
@@ -131,7 +131,7 @@ export function stepTraffic(T, pl, t, dt) {
       const sg = cur.seg, back = 110 + T.rnd() * 50, sAt = cur.s - (cur.fwd ? 1 : -1) * back;
       if (sAt > sg.trimA + 4 && sAt < sg.len - sg.trimB - 4 && !cars.some(o => o.kind === 'ems')) {
         const c = { id: T.nextId++, kind: 'ems', sub: T.rnd() < 0.5 ? 'amb' : 'police', mode: 'seg', seg: sg, fwd: cur.fwd, idx: 0, u: cur.fwd ? sAt - sg.trimA : sg.len - sg.trimB - sAt, v: sg.speed / MPH, L: 6.2, W: 2.2, col: 0, tr: 0, wait: 0, stopT: -1, x: 0, z: 0, h: 0, plan: null, w: 0, off: 0 };
-        poseOnSeg(c); planTurn(T, c); cars.push(c); T.emsT = 160 + T.rnd() * 160;
+        poseOnSeg(c); planTurn(T, c); cars.push(c); T.emsT = 420 + T.rnd() * 300;      // 7–12 分钟一辆
       }
     }
   }
@@ -224,10 +224,18 @@ export function stepTraffic(T, pl, t, dt) {
     // 鸣笛的车：开得快；前面有让到路边的车或者停下的玩家，就往左偏（压着中线）过去
     if (c.kind === 'ems') vmax = seg.speed / MPH * 1.25 + 3;
     else if (c.mode === 'seg') {
-      // 后面 80 米内有鸣笛的车：靠右、停下，等它过去
+      // 后面 80 米内有鸣笛的车：靠右、停下，等它过去（39:4-92）；对面开过来的也停下靠右。
+      // 右边停着车就只往右挪到不碰它为止，挪不动就停在车道里（鸣笛的车从左边绕过去）
       c.yieldE = false;
-      for (const e of emss) if (e.mode === 'seg' && e.seg === seg && e.fwd === c.fwd) { const d = (sAbsOf(c) - sAbsOf(e)) * (c.fwd ? 1 : -1); if (d > 0 && d < 80) c.yieldE = true; }
-      if (c.yieldE) { vmax = 0; if (!c.parked && !c.pulling && c.idx === useLane(seg, c.fwd) - 1) c.off = Math.min(1.3, (c.off || 0) + dt * 0.8); }
+      for (const e of emss) if (e.mode === 'seg' && e.seg === seg) { const d = (sAbsOf(c) - sAbsOf(e)) * (c.fwd ? 1 : -1); if (e.fwd === c.fwd ? d > 0 && d < 80 : d < 0 && d > -70) c.yieldE = true; }
+      if (c.yieldE) {
+        vmax = 0;
+        if (!c.parked && !c.pulling && c.idx === useLane(seg, c.fwd) - 1 && (c.off || 0) < 1.3) {
+          const nOff = Math.min(1.3, (c.off || 0) + dt * 0.8), sA = sAbsOf(c);
+          offsetPoint(seg, sA, laneCenter(seg, c.fwd, c.idx) + (c.fwd ? 1 : -1) * nOff, P);
+          if (!map.hitParked(P.x, P.z, c.h, c.L / 2 + 0.4, c.W / 2 + 0.25)) c.off = nOff;
+        }
+      }
       else if (!c.parked && !c.pulling && c.off > 0) c.off = Math.max(0, c.off - dt * (c.off > 1.5 ? 1.1 : 0.6));
       // 停着闪红灯的校车：同一条路上两个方向的车都停在离它 25 英尺（约 8 米）外
       for (const b of buses) if (b !== c && b.seg === seg) { const d = (sAbsOf(b) - sAbsOf(c)) * (c.fwd ? 1 : -1); if (d > 0 && d < 70) gap = Math.min(gap, d - (b.L + c.L) / 2 - 7.6); }
@@ -256,7 +264,7 @@ export function stepTraffic(T, pl, t, dt) {
     {
       const dx = pl.x - c.x, dz = pl.z - c.z, ahead = dx * hx + dz * hz, side = Math.abs(-dx * hz + dz * hx), dh = (pl.h || 0) - c.h;
       const sn = Math.abs(Math.sin(dh)), cs = Math.abs(Math.cos(dh)), ext = sn * CAR.L / 2 + cs * CAR.W / 2, along = cs * CAR.L / 2 + sn * CAR.W / 2;
-      if (Math.abs((pl.y || 0) - (c.y || 0)) < 3 && ahead > 0.5 && ahead < look && side - ext < c.W / 2 + 0.5 + (c.mode === 'junc' ? Math.min(1.5, Math.abs(pl.v) * 0.15) : 0)) obst(ahead - c.L / 2 - along - 2.4, pl.v * Math.cos(dh));
+      if (Math.abs((pl.y || 0) - (c.y || 0)) < 3 && ahead > 0.5 && ahead < look && side - ext < c.W / 2 + (c.kind === 'ems' && c.mode === 'seg' && Math.abs(pl.v) < 1 ? 0.05 : 0.5) + (c.mode === 'junc' ? Math.min(1.5, Math.abs(pl.v) * 0.15) : 0)) obst(ahead - c.L / 2 - along - 2.4, pl.v * Math.cos(dh));
     }
     // 铁路道口：闪红灯就停在离铁轨 15 英尺（4.6 米）的地方；没闪灯但道口那边堵着（停下来会停在铁轨上），也先在道口前等
     if (c.mode === 'seg' && seg.rail) for (const x of seg.rail) {
@@ -323,7 +331,7 @@ export function stepTraffic(T, pl, t, dt) {
       if (pedOnCrosswalk(T, c.plan.seg, c.plan.out.end)) gap = Math.min(gap, c.plan.len - c.w - c.L / 2 - XWALK_FAR - 0.5);
     }
     if (c.kind === 'ems') {
-      let blocked = false; for (const o of cars) if (o !== c && o.yieldE && o.mode === 'seg' && o.seg === c.seg) { const d = (sAbsOf(o) - sAbsOf(c)) * (c.fwd ? 1 : -1); if (d > -8 && d < 40) blocked = true; }
+      let blocked = false; for (const o of cars) if (o !== c && o.yieldE && o.mode === 'seg' && o.seg === c.seg && o.fwd === c.fwd) { const d = (sAbsOf(o) - sAbsOf(c)) * (c.fwd ? 1 : -1); if (d > -8 && d < 40) blocked = true; }
       if (cur && cur.seg === c.seg && c.mode === 'seg') { const d = (cur.s - sAbsOf(c)) * (c.fwd ? 1 : -1); if (d > -8 && d < 40 && Math.abs(pl.v) < 1) blocked = true; }
       const want = blocked ? -2.4 : 0; c.off = (c.off || 0) + Math.sign(want - (c.off || 0)) * Math.min(Math.abs(want - (c.off || 0)), dt * 1.6);
     }
@@ -344,7 +352,9 @@ export function stepTraffic(T, pl, t, dt) {
       const p = c.plan; if (!justIn) c.w += step;
       // 校车拐进新路段：看这一段要不要停（离两头都至少 45 米，从路口拐进来的车还来得及停）
       if (c.w >= p.len) { c.mode = 'seg'; c.seg = p.seg; c.fwd = p.fwd; c.idx = p.idx; c.u = c.w - p.len; c.w = 0; if (c.kind === 'bus') c.nextStop = c.seg.useLen > 110 && T.rnd() < 0.6 ? 45 + T.rnd() * (c.seg.useLen - 90) : null; if (c.kind === 'ems') c.off = 0; planTurn(T, c); poseOnSeg(c); }
-      else { const k = c.w / p.len; c.x = bez(p.x0, p.cx, p.x2, k); c.z = bez(p.z0, p.cz, p.z2, k); c.y = p.j.y || 0; c.h = Math.atan2(2 * (1 - k) * (p.cz - p.z0) + 2 * k * (p.z2 - p.cz), 2 * (1 - k) * (p.cx - p.x0) + 2 * k * (p.x2 - p.cx)); }
+      else { const k = c.w / p.len; c.x = bez(p.x0, p.cx, p.x2, k); c.z = bez(p.z0, p.cz, p.z2, k); c.y = p.j.y || 0; c.h = Math.atan2(2 * (1 - k) * (p.cz - p.z0) + 2 * k * (p.z2 - p.cz), 2 * (1 - k) * (p.cx - p.x0) + 2 * k * (p.x2 - p.cx));
+        // 鸣笛的车绕着别的车开进路口：偏出去的那段在路口前半段慢慢收回来，不是一下跳回车道中间（会跳到旁边停着的车身上）
+        if (c.kind === 'ems' && c.off) { const f = c.off * Math.max(0, 1 - 2 * k); c.x -= Math.sin(c.h) * f; c.z += Math.cos(c.h) * f; } }
     }
   }
 }

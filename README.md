@@ -27,6 +27,7 @@ python -m http.server 8765
 | `data/map.json` | 处理好的地图（由下面的脚本生成） |
 | `tools/build_map.mjs` | 把 `tools/raw/osm.json` 处理成 `data/map.json` |
 | `tools/test_rules.mjs` | 机器人开车过路口，检查交规判定 |
+| `tools/test_ems.mjs` | 玩家停在窄街车道里，鸣笛的车能不能绕过去、让路的车会不会压到路边停的车（`node tools/test_ems.mjs map_all.json`） |
 | `tools/test_hits.mjs` | 假玩家开车，统计别的车撞它的次数（`node tools/test_hits.mjs map_all.json 10`） |
 | `tools/fetch_rail.mjs` | 下载铁路平交道口 → `data/rail.json` |
 | `tools/fetch_schools.mjs` | 下载学校（OSM amenity=school）→ `data/schools.json`，载入时划学校区 |
@@ -218,4 +219,12 @@ node tools/cdp.mjs "http://127.0.0.1:8765/?style=cel&fly&v=8&len=260&q=0" --vide
 - 同方向车道之间：快到路口（不是路段中间切开的 joint）那 24 米画白实线，别处白虚线（`map.js` 的 `solidFrom / solidAt`，画线和判定共用）。按 MUTCD：白实线不鼓励变道、双白实线才禁止。在白实线那段变道（打了灯）判 `lane_solid`（−2，小问题）；没打灯照旧 `lane_no_signal`。
 - `build_map.mjs` 保留 OSM 的 `lane_markings=no`（`nomark: 1`，大图 218 段，双向的 119 段），这些路不画中线和车道线；在上面开到左半边，提示改成“中间没画线也要靠右半边开”（39:4-82）。
 - 图鉴“路上的线”改成游戏里会判：各种黄线、白线的意思。数据里没有黄虚线（OSM 的 overtaking 标签这片一个都没有）和双白实线，游戏里不画。
+
+### 第二十轮：救护车让路
+
+- 玩家反馈：救护车太多，右边停满车根本让不了，AI 车直接平移到停着的车身上。
+- 频率：第一辆从开局 75 秒改成 4 分钟，之后 7–12 分钟一辆（以前 2.5–5 分钟）。
+- 停在车道里也算让路（判定本来就是“停下来”，提示和图鉴以前只说靠右，现在写清楚：右边停满车就停在车道里，别往停着的车上挤，它从左边绕）。
+- 以前鸣笛的车绕玩家时往左偏 2.4 米，但看玩家的空隙按 0.5 米算，正好被挡住，一直跟在停着的玩家后面（`test_ems` 改之前 0/11 绕过去）。现在路段上、玩家停着时空隙按 0.05 米算。绕过去以后进路口，偏出去的那段在路口前半段慢慢收回来，不再一下跳回车道中间。
+- 让路的 AI 车往右靠时每一步用 `map.hitParked` 试一下，碰到停着的车就不再往右（改之前 11 条窄街里 5 条压到）。对面开过来的车也停下靠右（39:4-92 不分方向）。鸣笛的车只为同方向停下的车往左绕。
 
