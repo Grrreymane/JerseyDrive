@@ -673,7 +673,7 @@ const POI = []; map.raw.buildings.forEach((b, bi) => { if (!b.nm && !b.n) return
 /** fromMenu：从开始界面打开，用来选出发点（这时候还没开车，不涉及暂停） */
 function toggleBig(fromMenu) {
   bigOpen = !bigOpen; $('bigmap').classList.toggle('hidden', !bigOpen);
-  if (bigOpen) { bigMenu = fromMenu === true; setPin(null); $('bigQ').value = ''; $('bigRes').innerHTML = ''; bm.x = S.car.x; bm.z = S.car.z; bm.s = 0.9; if (!bigMenu) setPaused(true); drawBig(); }
+  if (bigOpen) { bigMenu = fromMenu === true; show('navOpts', !bigMenu); setPin(null); $('bigQ').value = ''; $('bigRes').innerHTML = ''; bm.x = S.car.x; bm.z = S.car.z; bm.s = 0.9; if (!bigMenu) setPaused(true); drawBig(); }
   else { $('bigQ').blur(); if (!bigMenu && $('pause').classList.contains('hidden') && $('lessonDone').classList.contains('hidden')) setPaused(false); }
 }
 /** 在大地图上选中一个地点：下面出来操作条（导航到这里 / 从这里出发） */
@@ -763,6 +763,16 @@ if (params.has('nohud')) $('hud').style.visibility = 'hidden';
 
 // ---------- 导航：在大地图上点一下设目的地，按时间最短算路线（认单行道），一路提示下一个转弯 ----------
 let route = null, routeT = 0;
+// 路线选项：避开高速（motorway，含匝道）/ 避开收费路（OSM toll=yes）。不是禁止走，是代价加很多：实在绕不开（比如车就在高速上）还是会走
+const avoid = { hwy: false, toll: false }; try { Object.assign(avoid, JSON.parse(localStorage.getItem('jdNavAvoid')) || {}); } catch { /* 存不了就用默认 */ }
+const avoided = (g) => (avoid.hwy && g.cls === 'motorway') || (avoid.toll && g.toll);
+for (const [id, k] of [['optNoHwy', 'hwy'], ['optNoToll', 'toll']]) {
+  $(id).checked = avoid[k];
+  $(id).onchange = () => {
+    avoid[k] = $(id).checked; try { localStorage.setItem('jdNavAvoid', JSON.stringify(avoid)); } catch { /* 同上 */ }
+    if (route) { const r = planRoute(route.dest); if (r) { route = r; routeT = performance.now(); } drawBig(); navTick(); }
+  };
+}
 function curState() {
   const c = S.car, l = map.locate(c.x + Math.cos(c.h) * CAR.center, c.z + Math.sin(c.h) * CAR.center, {}, c.y || 0); if (!l.seg) return null;
   let fwd = Math.cos(c.h) * l.dx + Math.sin(c.h) * l.dz >= 0; if (!fwd && l.seg.lb === 0) fwd = true;
@@ -781,13 +791,13 @@ function planRoute(dest) {
     for (const l of j.legs) {
       if (l === leg || !l.exit || leg.bans?.has(l)) continue; const g = l.segRef, f2 = l.end === 'a'; if (!(f2 ? g.lf : g.lb)) continue;
       const type = turnType(-leg.ox, -leg.oz, l.ox, l.oz); if (type === 'uturn') continue;
-      const v = g.id * 2 + (f2 ? 1 : 0), cost = best + g.useLen / (g.speed / MPH) + (j.control === 'joint' ? 0 : (type === 'left' ? 12 : type === 'right' ? 6 : 3) + (j.control === 'signal' ? 8 : 0));
+      const v = g.id * 2 + (f2 ? 1 : 0), cost = best + g.useLen / (g.speed / MPH) * (avoided(g) ? 8 : 1) + (avoided(g) ? 300 : 0) + (j.control === 'joint' ? 0 : (type === 'left' ? 12 : type === 'right' ? 6 : 3) + (j.control === 'signal' ? 8 : 0));
       if (cost < dist[v]) { dist[v] = cost; prev[v] = u; }
     }
   }
   const list = []; for (let u = goal; u >= 0; u = prev[u]) list.unshift({ seg: map.segs[u >> 1], fwd: !!(u & 1) });
   let len = 0; for (const r of list) len += r.seg.useLen;
-  return { dest, list, len };
+  return { dest, list, len, toll: list.some(r => r.seg.toll), hwy: list.some(r => r.seg.cls === 'motorway') };
 }
 function setDest(x, z) {
   const l = map.locate(x, z, {}); if (!l.seg || l.d > 60) return;
@@ -833,7 +843,7 @@ function navTick() {
   $('navArrow').textContent = NAV_ARROW[kind];
   $('navText').textContent = kind === 'arrive' ? `${m}后到达` : near ? `现在${NAV_WORD[kind]}` : `${m}后${NAV_WORD[kind]}`;
   const need = kind === 'left' ? -1 : kind === 'right' ? 1 : 0, sig = need && d < 70 && c.signal !== need ? `　·　打${kind === 'left' ? '左' : '右'}灯（${kind === 'left' ? 'Q' : 'E'}）` : '';
-  $('navSub').textContent = (kind === 'arrive' ? shortName(route.dest.name || '目的地') : '进入 ' + shortName(into || '无名路')) + `　·　全程还剩 ${total >= 1000 ? (total / 1000).toFixed(1) + ' 公里' : Math.round(total / 10) * 10 + ' 米'}` + sig;
+  $('navSub').textContent = (kind === 'arrive' ? shortName(route.dest.name || '目的地') : '进入 ' + shortName(into || '无名路')) + `　·　全程还剩 ${total >= 1000 ? (total / 1000).toFixed(1) + ' 公里' : Math.round(total / 10) * 10 + ' 米'}` + (route.list.some(r => r.seg.toll) ? '　·　要走收费路' : '') + sig;
   show('navBox', true);
 }
 window.__jd.setDest = setDest; window.__jd.navRoute = () => route; window.__jd.toast = toast;

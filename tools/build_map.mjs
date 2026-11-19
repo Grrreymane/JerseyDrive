@@ -62,9 +62,9 @@ function attrs(t) {
   let turnB = tl(t['turn:lanes:backward']);
   if (turnF.length !== lf) turnF = [];
   if (turnB.length !== lb) turnB = [];
-  return { name: t.name || '', cls, oneway, lf, lb, speed, speedTagged: !!t.maxspeed, park, turnF, turnB };
+  return { name: t.name || '', cls, oneway, lf, lb, speed, speedTagged: !!t.maxspeed, park, turnF, turnB, toll: t.toll === 'yes' };
 }
-const keyOf = (a) => [a.tun ? 'T' : '', a.name, a.cls, a.oneway, a.lf, a.lb, a.speed, a.turnF.join('/'), a.turnB.join('/')].join('|');
+const keyOf = (a) => [a.tun ? 'T' : '', a.toll ? '$' : '', a.name, a.cls, a.oneway, a.lf, a.lb, a.speed, a.turnF.join('/'), a.turnB.join('/')].join('|');
 
 // ---------- 2. 取出可开的路，按范围裁剪，在共用节点处切段 ----------
 const runs = [];
@@ -333,7 +333,7 @@ const segs = pieces.map(p => {
   const pts = [], ys = []; let last = null;
   for (const id of p.ids) { const q = nodes.get(id).p; if (last && dist(last, q) < 0.3) continue; pts.push(r2(q[0]), r2(q[1])); ys.push(r2(H.get(id) || 0)); last = q; }
   const ja = juncOfNode.get(p.ids[0]), jb = juncOfNode.get(p.ids[p.ids.length - 1]);
-  return { id: p.sid, name: p.name, cls: p.cls, oneway: p.oneway, lf: p.lf, lb: p.lb, speed: p.speed, speedTagged: p.speedTagged, park: p.park, turnF: p.turnF, turnB: p.turnB, a: ja ? ja.id : -1, b: jb ? jb.id : -1, pts, ...(ys.some(v => Math.abs(v) > 0.05) ? { ys } : {}), ...(p.tun ? { tun: 1 } : {}) };
+  return { id: p.sid, name: p.name, cls: p.cls, oneway: p.oneway, lf: p.lf, lb: p.lb, speed: p.speed, speedTagged: p.speedTagged, park: p.park, turnF: p.turnF, turnB: p.turnB, a: ja ? ja.id : -1, b: jb ? jb.id : -1, pts, ...(ys.some(v => Math.abs(v) > 0.05) ? { ys } : {}), ...(p.tun ? { tun: 1 } : {}), ...(p.toll ? { toll: 1 } : {}) };
 });
 const juncOut = juncs.map(j => ({
   id: j.id, x: r2(j.x), z: r2(j.z), y: r2([...j.members].reduce((a, id) => a + (H.get(id) || 0), 0) / j.members.size), control: j.control, inferred: !!j.inferred,

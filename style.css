@@ -90,7 +90,10 @@ button.ghost { background: rgba(255, 255, 255, 0.07); color: var(--text); font-w
 /* 导航提示（左上角，路名下面） */
 #navBox { display: flex; gap: 12px; align-items: center; background: #1a56c4; border-radius: 12px; padding: 9px 16px 9px 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
 #navArrow { font-size: 34px; line-height: 1; width: 40px; text-align: center; } #navText { display: block; font-weight: 700; font-size: 17px; } #navSub { color: #cfe0ff; font-size: 13px; }
-#btnNavClear { position: absolute; right: 18px; top: 18px; background: #202124; color: #fff; }
+#bigRight { position: absolute; right: 18px; top: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; cursor: default; }
+#btnNavClear { margin: 0; background: #202124; color: #fff; } #btnNavClear.hidden { display: none; }
+#navOpts { background: #fff; color: #202124; border-radius: 14px; padding: 8px 14px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); display: flex; flex-direction: column; gap: 4px; font-size: 14px; } #navOpts.hidden { display: none; }
+#navOpts label { display: flex; align-items: center; gap: 7px; cursor: pointer; white-space: nowrap; } #navOpts input { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: #1a56c4; }
 /* 大地图：搜索框、选中地点后的操作条 */
 #bigSearch { position: absolute; left: 18px; top: 18px; width: min(360px, calc(100vw - 180px)); cursor: default; }
 #bigQ { width: 100%; box-sizing: border-box; padding: 11px 16px; border: 0; border-radius: 24px; font-size: 15px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); outline: none; background: #fff; color: #202124; }
