@@ -55,7 +55,7 @@ export const LESSONS = [
   },
   {
     title: '变道', start: 'multi',
-    brief: '先打灯（Q / E），看后视镜，再回头看一眼盲区（Z / 按住 X），确认没车再平顺地并过去。',
+    brief: '先打灯（Q / E），看后视镜，再扭头看一眼盲区（Z / X），确认没车再平顺地并过去。',
     goals: [{ k: 'ev', ev: 'good_lane', n: 3, text: '打灯变道 3 次' }], forbid: ['lane_no_signal', 'hit_car'],
   },
   {
@@ -65,7 +65,7 @@ export const LESSONS = [
   },
   {
     title: '直线倒车', start: 'default',
-    brief: '路考项目。踩刹车挂 R（按 2），回头看（Z + X 一起按）或看后视镜，松刹车让车慢慢退，方向盘只做很小的修正。',
+    brief: '路考项目。踩刹车挂 R（按 2），按住 V 回头看后面（或点仪表盘上的“回头”），松刹车让车慢慢退，方向盘只做很小的修正。',
     goals: [{ k: 'x', id: 'rev', n: 15, text: '直线倒车 15 米，不碰任何东西' }], forbid: ['crash', 'hit_car', 'hit_ped', 'off_road'],
   },
   {
@@ -75,7 +75,7 @@ export const LESSONS = [
   },
   {
     title: '侧方停车', start: 'park',
-    brief: '路考项目。开到车位前面那辆车旁边，并排、车尾对齐 → 挂 R，向右打死倒到车身 45° → 回正再倒 → 向左打死摆正。停进绿框后挂 P。',
+    brief: '路考项目。打右灯，开到车位前面那辆车旁边，并排、车尾对齐 → 挂 R，按住 V 回头看，向右打死倒到车身 45° → 回正再倒 → 向左打死摆正。停进绿框后挂 P。后面来车会停远一点等你，等久了会从旁边绕过去。',
     goals: [{ k: 'x', id: 'park', n: 1, text: '停进绿框，摆正，挂 P' }], forbid: ['hit_ped'],
   },
 ];

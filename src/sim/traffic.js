@@ -191,6 +191,10 @@ export function stepTraffic(T, pl, t, dt) {
   }
 
   // ---------- 车 ----------
+  // 玩家停在车道里不走、或者在倒车（侧方停车、掉头、等人）：后面的车停远一点（倒车、打右灯、双闪时留 7 米给你倒）；等 3 秒对面没车就从左边绕过去
+  const plSlow = Math.abs(pl.v) < 1.2 && !!(cur && cur.seg) && !cur.junc;
+  T.plStill = plSlow ? (T.plStill || 0) + dt : 0;
+  const plPark = plSlow && (pl.gear === 'R' || pl.sig === 1 || pl.sig === 2);
   for (const c of cars) {
     if (c.hitT > 0) { c.hitT -= dt; c.v = 0; continue; }
     if (c.fixed) { c.v = 0; continue; }      // Move Over 那两辆：一直停着
@@ -254,17 +258,37 @@ export function stepTraffic(T, pl, t, dt) {
       // 路中间横穿的行人
       for (const q of mids) if (q.seg === seg) { const d = (q.s - sAbsOf(c)) * (c.fwd ? 1 : -1); if (d > 0 && d < 35) gap = Math.min(gap, d - c.L / 2 - 2.5); }
     }
+    let behindPl = -1e9;
+    if (c.mode === 'seg' && c.kind !== 'ems' && c.kind !== 'bus' && !c.parked && !c.pulling) {
+      if (cur && cur.seg === seg && cur.fwd === c.fwd && !cur.junc) behindPl = (cur.s - sAbsOf(c)) * (c.fwd ? 1 : -1);
+      if (c.passing) { vmax = Math.min(vmax, 5); if (behindPl < -(c.L + 4)) c.passing = false; }
+      else if (behindPl > 0 && behindPl < 28 && T.plStill > 3 && c.v < 0.3) {
+        c.pwait = (c.pwait || 0) + dt;
+        const left = c.idx > 0 ? 'lane' : (c.fwd ? seg.lb : seg.lf) > 0 ? 'opp' : null;      // 左边有同向的道，或者是双向路（借对向车道）
+        if (c.pwait > 2.5 && left && seg.useLen - c.u > behindPl + 14) {
+          const me = sAbsOf(c), dir = c.fwd ? 1 : -1;
+          const busy = cars.some(o => o !== c && o.mode === 'seg' && o.seg === seg && (left === 'lane' ? o.fwd === c.fwd && o.idx === c.idx - 1 && Math.abs(sAbsOf(o) - me) < 30 : o.fwd !== c.fwd && !o.parked && (sAbsOf(o) - me) * dir > -2 && (sAbsOf(o) - me) * dir < behindPl + 20 + o.v * 8));      // 对面来车：绕完这一段（约 8 秒）之前会开到的才算；停在路边的、已经开过去的不算
+          // 弯道上不借道（看不见对面来车，车身也会扫到玩家）：从自己到玩家前面 12 米，路的方向变了 20° 以上就接着等
+          pointAt(seg, me, P); const h0 = Math.atan2(P.dz, P.dx); pointAt(seg, Math.max(seg.trimA, Math.min(seg.len - seg.trimB, cur.s + dir * 12)), P);
+          let dh = Math.atan2(P.dz, P.dx) - h0; while (dh > Math.PI) dh -= 2 * Math.PI; while (dh < -Math.PI) dh += 2 * Math.PI;
+          if (!busy && Math.abs(dh) < 0.35) { c.passing = true; c.pwait = 0; }
+        }
+      } else c.pwait = 0;
+      const want = c.passing ? -LANE_W : 0;
+      if (c.passing || c.off < 0) c.off = (c.off || 0) + Math.sign(want - (c.off || 0)) * Math.min(Math.abs(want - (c.off || 0)), dt * 1.4);
+    }
     // 前面的东西：同车道的车、路口里刚进去的车、玩家
     for (const o of cars) {
       if (o === c || o.parked || o.isPlayer || (c.kind === 'ems' && o.yieldE)) continue;      // 停在路边的车不挡路；鸣笛的车绕过让到路边的车
       const dx = o.x - c.x, dz = o.z - c.z, ahead = dx * hx + dz * hz; if (ahead < 0.5 || ahead > look || Math.abs((o.y || 0) - (c.y || 0)) > 3) continue;
-      const ch = Math.cos(o.h - c.h); if (Math.abs(-dx * hz + dz * hx) < 1.7 && ch > (ahead > 40 ? 0.7 : -0.3)) obst(ahead - (c.L + o.L) / 2 - 2.2, o.v * ch);
+      const ch = Math.cos(o.h - c.h); if (Math.abs(-dx * hz + dz * hx) < 1.7 && (ch > (ahead > 40 ? 0.7 : -0.3) || (o.passing && !c.passing && ch < -0.7 && ahead < 40))) obst(ahead - (c.L + o.L) / 2 - 2.2, o.v * ch);      // 对面有车借我这条道绕玩家：我停下等它绕回去（它已经开出去了，不让它停，免得两边干耗）
     }
     // 玩家：按玩家车身实际占的宽度算（斜着变道、没开在车道中间时，车角会伸进这条道）
     {
       const dx = pl.x - c.x, dz = pl.z - c.z, ahead = dx * hx + dz * hz, side = Math.abs(-dx * hz + dz * hx), dh = (pl.h || 0) - c.h;
       const sn = Math.abs(Math.sin(dh)), cs = Math.abs(Math.cos(dh)), ext = sn * CAR.L / 2 + cs * CAR.W / 2, along = cs * CAR.L / 2 + sn * CAR.W / 2;
-      if (Math.abs((pl.y || 0) - (c.y || 0)) < 3 && ahead > 0.5 && ahead < look && side - ext < c.W / 2 + (c.kind === 'ems' && c.mode === 'seg' && Math.abs(pl.v) < 1 ? 0.05 : 0.5) + (c.mode === 'junc' ? Math.min(1.5, Math.abs(pl.v) * 0.15) : 0)) obst(ahead - c.L / 2 - along - 2.4, pl.v * Math.cos(dh));
+      const around = c.passing && c.off < -2.4 && Math.abs(pl.v) < 1.2;      // 已经开到左边那条道上绕玩家了：路弯的时候按车头方向量会误判成玩家挡在前面
+      if (!around && Math.abs((pl.y || 0) - (c.y || 0)) < 3 && ahead > 0.5 && ahead < look && side - ext < c.W / 2 + ((c.kind === 'ems' || c.passing) && c.mode === 'seg' && Math.abs(pl.v) < 1.2 ? 0.05 : 0.5) + (c.mode === 'junc' ? Math.min(1.5, Math.abs(pl.v) * 0.15) : 0)) obst(ahead - c.L / 2 - along - 2.4 - (plPark && behindPl > 0 && !c.passing ? 7 : 0), pl.v * Math.cos(dh));
     }
     // 铁路道口：闪红灯就停在离铁轨 15 英尺（4.6 米）的地方；没闪灯但道口那边堵着（停下来会停在铁轨上），也先在道口前等
     if (c.mode === 'seg' && seg.rail) for (const x of seg.rail) {
@@ -351,10 +375,10 @@ export function stepTraffic(T, pl, t, dt) {
     if (c.mode === 'junc') {
       const p = c.plan; if (!justIn) c.w += step;
       // 校车拐进新路段：看这一段要不要停（离两头都至少 45 米，从路口拐进来的车还来得及停）
-      if (c.w >= p.len) { c.mode = 'seg'; c.seg = p.seg; c.fwd = p.fwd; c.idx = p.idx; c.u = c.w - p.len; c.w = 0; if (c.kind === 'bus') c.nextStop = c.seg.useLen > 110 && T.rnd() < 0.6 ? 45 + T.rnd() * (c.seg.useLen - 90) : null; if (c.kind === 'ems') c.off = 0; planTurn(T, c); poseOnSeg(c); }
+      if (c.w >= p.len) { c.mode = 'seg'; c.seg = p.seg; c.fwd = p.fwd; c.idx = p.idx; c.u = c.w - p.len; c.w = 0; if (c.kind === 'bus') c.nextStop = c.seg.useLen > 110 && T.rnd() < 0.6 ? 45 + T.rnd() * (c.seg.useLen - 90) : null; if (c.kind === 'ems' || c.off < 0) c.off = 0; c.passing = false; planTurn(T, c); poseOnSeg(c); }
       else { const k = c.w / p.len; c.x = bez(p.x0, p.cx, p.x2, k); c.z = bez(p.z0, p.cz, p.z2, k); c.y = p.j.y || 0; c.h = Math.atan2(2 * (1 - k) * (p.cz - p.z0) + 2 * k * (p.z2 - p.cz), 2 * (1 - k) * (p.cx - p.x0) + 2 * k * (p.x2 - p.cx));
         // 鸣笛的车绕着别的车开进路口：偏出去的那段在路口前半段慢慢收回来，不是一下跳回车道中间（会跳到旁边停着的车身上）
-        if (c.kind === 'ems' && c.off) { const f = c.off * Math.max(0, 1 - 2 * k); c.x -= Math.sin(c.h) * f; c.z += Math.cos(c.h) * f; } }
+        if ((c.kind === 'ems' || c.off < 0) && c.off) { const f = c.off * Math.max(0, 1 - 2 * k); c.x -= Math.sin(c.h) * f; c.z += Math.cos(c.h) * f; } }
     }
   }
 }

@@ -242,11 +242,13 @@ function readInput(dt) {
   inp.steer = steer; inp.analog = analog;
   // 右后视镜在正前方视野外面：按 X 先转到正对右镜（约 54°），按住超过半秒再继续转成回头看右后方盲区
   const L = k('KeyZ'), Rr = k('KeyX');
+  if (k('KeyV') || S.lookBack || (pad && pad.buttons[2] && pad.buttons[2].pressed)) return Math.PI;      // 回头看后面：按住 V，或者点一下仪表盘上的“回头”按钮（再点一下转回来）
   return L && Rr ? Math.PI : L ? -1.3 : Rr ? 1.35 : 0;      // 向右看一次转到位（以前先转一点、按住再转第二段，看着像卡了一下）
 }
 
 // ---------- 界面 ----------
 $('hazBtn').onclick = (e) => { setSignal(S.car, 2); e.currentTarget.blur(); };
+$('backBtn').onclick = (e) => { S.lookBack = !S.lookBack; e.currentTarget.classList.toggle('on', S.lookBack); e.currentTarget.blur(); };
 const el = { speed: $('speed'), street: $('streetName'), info: $('streetInfo'), score: $('scoreNum'), limit: $('limitNum'), sigL: $('sigL'), sigR: $('sigR'), coach: $('coach'), cIcon: $('coachIcon'), cText: $('coachText'), cSub: $('coachSub'), preview: $('preview'), gas: $('pGas'), brake: $('pBrake'), clean: $('cleanNum'), cleanBest: $('cleanBest') };
 const gearEls = [...document.querySelectorAll('#gears span')];
 const last = {};
@@ -417,7 +419,7 @@ function resize() {
 addEventListener('resize', resize); resize();
 
 const PC = {};
-function stepActors(dt) { const c = S.car, A = S.R.A; carCenter(c, PC); stepTraffic(T, { x: PC.x, z: PC.z, y: c.y || 0, h: c.h, v: c.v, sig: c.signal, cur: S.R.cur, stopT: A && A.stopped ? A.stopT : -1 }, S.t, dt); }
+function stepActors(dt) { const c = S.car, A = S.R.A; carCenter(c, PC); stepTraffic(T, { x: PC.x, z: PC.z, y: c.y || 0, h: c.h, v: c.v, sig: c.signal, gear: c.gear, cur: S.R.cur, stopT: A && A.stopped ? A.stopT : -1 }, S.t, dt); }
 function simStep(lookT) {
   stepCar(S.car, inp, DT);
   if (trafficOn) stepActors(DT);
@@ -602,8 +604,11 @@ function findStart(kind) {
     if (!parkSpot) {
       const by = new Map(), L = {}; for (const p of map.parked) { let a = by.get(p.seg); if (!a) by.set(p.seg, a = []); a.push(p); }
       let bd = 1e9;
-      for (const [id, list] of by) {
+      // 先找后车能从旁边绕过去的街（双向、或者两条道以上）；找不到再放宽
+      for (const strict of [true, false]) for (const [id, list] of by) {
+        if (!strict && parkSpot) break;
         const g = map.segs[id]; if (!g || g.speed > 25 || g.useLen < 70) continue;
+        if (strict && !(g.lb > 0 || g.lf >= 2)) continue;
         const ss = []; for (const p of list) { map.locate(p.x, p.z, L); if (L.seg === g && L.o > 0) ss.push(L.s); } ss.sort((a, b) => a - b);
         for (let i = 1; i < ss.length; i++) { const gap = ss[i] - ss[i - 1]; if (gap < 11.5 || gap > 13.5 || ss[i - 1] - g.trimA < 26) continue; const u = (ss[i] + ss[i - 1]) / 2, q = offsetPoint(g, u, g.halfW - 1.15, {}), d = Math.hypot(q.x - startPose.x, q.z - startPose.z); if (d < bd) { bd = d; parkSpot = { x: q.x, z: q.z, h: Math.atan2(q.dz, q.dx), g, u }; } }
       }
@@ -658,13 +663,13 @@ function lessonTick() {
   $('btnLdNext').style.display = ok && lesson.i < LESSONS.length - 1 ? '' : 'none';
   show('lessonDone', true); if (ok) audio.good(); else audio.bad();
 }
-ready = true; buildStartList(); if (wantLesson >= 0 && cloudOK) { const w = wantLesson; wantLesson = -1; startLesson(w); }
+ready = true; buildStartList(); if (wantLesson >= 0 && cloudOK) { const w = wantLesson; wantLesson = -1; setTimeout(() => startLesson(w), 0); }      // 等这个文件后面的变量（大地图等）都初始化完再开课
 $('btnLdNext').onclick = () => startLesson(lesson.i + 1);
 $('btnLdRetry').onclick = () => startLesson(lesson.i);
 $('btnLdFree').onclick = () => { endLesson(); show('lessonDone', false); setPaused(false); };
 const toMenu = () => { endClean(); endLesson(); buildLessonList(); for (const id of ['lessonDone', 'pause', 'hud']) show(id, false); show('start', true); S.running = false; setPaused(true); };
 $('btnLdMenu').onclick = toMenu; $('btnLessons').onclick = toMenu;
-if (params.has('lesson')) startLesson(Math.max(0, Math.min(LESSONS.length - 1, +params.get('lesson') - 1)));
+if (params.has('lesson')) setTimeout(() => startLesson(Math.max(0, Math.min(LESSONS.length - 1, +params.get('lesson') - 1))), 0);
 
 // ---------- 大地图（M）：上北下南，拖动平移，滚轮缩放 ----------
 let bigOpen = false, bigMenu = false, pin = null; const bm = { x: 0, z: 0, s: 1 }, bigCv = $('bigCanvas'), bg = bigCv.getContext('2d');

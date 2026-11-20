@@ -255,14 +255,17 @@ export function buildCarView(scene, renderer, navCanvas) {
     const cx0 = car.x + fx * CAR.center, cz0 = car.z + fz * CAR.center;
     camera.up.set(0, 1, 0);
     if (view.mode === 'cockpit') {
-      const lean = Math.sin(view.look) * 0.1, a = car.h + view.look;
-      camera.position.set(car.x + fx * EYE.x + rx * (EYE.z + lean), cy + EYE.y, car.z + fz * EYE.x + rz * (EYE.z + lean));
-      tgt.set(camera.position.x + Math.cos(a), cy + EYE.y - 0.02, camera.position.z + Math.sin(a)); camera.lookAt(tgt);
+      // 回头看后面：像真人一样扭过身子，头挪到两个座椅中间、抬高一点，从后窗看出去（以前头不动，眼前全是自己的座椅靠背）
+      const back = Math.min(1, Math.max(0, (Math.abs(view.look) - 1.9) / 1.0)), bk = back * back * (3 - 2 * back);
+      const lean = Math.sin(view.look) * 0.1 * (1 - bk), a = car.h + view.look;
+      const ex = EYE.x - 0.12 * bk, ey = EYE.y + 0.27 * bk, ez = EYE.z * (1 - 0.95 * bk) + lean;
+      camera.position.set(car.x + fx * ex + rx * ez, cy + ey, car.z + fz * ex + rz * ez);
+      tgt.set(camera.position.x + Math.cos(a), cy + ey - 0.02 - 0.16 * bk, camera.position.z + Math.sin(a)); camera.lookAt(tgt);
       camera.layers.set(0); camera.layers.enable(1);
       if ((view.frame & 1) === 0) drawCluster(car, (performance.now() % 760) < 380);
     } else if (view.mode === 'chase') {
       const a = car.h + view.look;
-      camera.position.set(cx0 - Math.cos(a) * 8.5, cy + 3.6, cz0 - Math.sin(a) * 8.5); tgt.set(cx0 + fx * 4, cy + 1.0, cz0 + fz * 4); camera.lookAt(tgt);
+      camera.position.set(cx0 - Math.cos(a) * 8.5, cy + 3.6, cz0 - Math.sin(a) * 8.5); tgt.set(cx0 + Math.cos(a) * 4, cy + 1.0, cz0 + Math.sin(a) * 4); camera.lookAt(tgt);      // 回头看时镜头转到车前面、朝后看
       camera.layers.set(0); camera.layers.enable(2);
     } else {
       camera.position.set(cx0 + fx * 6, cy + 60, cz0 + fz * 6); camera.up.set(fx, 0, fz); tgt.set(cx0 + fx * 6, cy, cz0 + fz * 6); camera.lookAt(tgt);
