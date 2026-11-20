@@ -1,6 +1,6 @@
 // 交通标志：用 canvas 画，3D 贴图和图鉴界面共用。
 // drawSign(ctx, id, S)：在 (0,0)-(S,S) 的方格里画一个标志，背景透明。
-const RED = '#c1121f', YEL = '#f6c700', BLK = '#111', WHT = '#fff', GRN = '#0b6b3a', FYG = '#c8e000';
+const ORG = '#f28c00', BLU = '#1d4fa0', RED = '#c1121f', YEL = '#f6c700', BLK = '#111', WHT = '#fff', GRN = '#0b6b3a', FYG = '#c8e000';
 const FONT = (px, w = 800) => `${w} ${px}px "Arial Narrow", "Helvetica Neue", Arial, sans-serif`;
 
 function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
@@ -44,7 +44,6 @@ const D = {
     c.fillStyle = WHT; c.fillRect(0.16, 0.44, 0.68, 0.12); text(c, 'DO NOT', 0.5, 0.32, 0.13, WHT); text(c, 'ENTER', 0.5, 0.69, 0.13, WHT);
   },
   wrongway(c) { plate(c, 0.06, 0.24, 0.88, 0.52, RED, WHT); text(c, 'WRONG', 0.5, 0.4, 0.19, WHT); text(c, 'WAY', 0.5, 0.61, 0.19, WHT); },
-  speed25(c) { speed(c, '25'); }, speed35(c) { speed(c, '35'); }, speed20(c) { speed(c, '20'); },
   noleft(c) { plate(c, 0.04, 0.04, 0.92, 0.92, WHT, BLK); bentArrow(c, -1, BLK, 0.08, 0.58); prohibit(c); },
   noright(c) { plate(c, 0.04, 0.04, 0.92, 0.92, WHT, BLK); bentArrow(c, 1, BLK, 0.08, 0.42); prohibit(c); },
   nouturn(c) {
@@ -86,6 +85,35 @@ const D = {
   },
   rr(c) { c.beginPath(); c.arc(0.5, 0.5, 0.46, 0, 7); c.fillStyle = YEL; c.fill(); c.lineWidth = 0.02; c.strokeStyle = BLK; c.stroke(); c.lineWidth = 0.07; c.beginPath(); c.moveTo(0.18, 0.18); c.lineTo(0.82, 0.82); c.moveTo(0.82, 0.18); c.lineTo(0.18, 0.82); c.stroke(); text(c, 'R', 0.26, 0.5, 0.2); text(c, 'R', 0.74, 0.5, 0.2); },
   stophere(c) { plate(c, 0.14, 0.04, 0.72, 0.92, WHT, BLK); text(c, 'STOP', 0.5, 0.17, 0.15); text(c, 'HERE', 0.5, 0.33, 0.15); text(c, 'ON', 0.5, 0.49, 0.15); text(c, 'RED', 0.5, 0.65, 0.15, RED); arrow(c, 0.62, 0.74, 0.38, 0.9, 0.05, BLK, 2); },
+  // 图鉴里的（路上暂时没有）
+  nopass(c) { c.beginPath(); c.moveTo(0.03, 0.2); c.lineTo(0.97, 0.5); c.lineTo(0.03, 0.8); c.closePath(); c.fillStyle = YEL; c.fill(); c.lineWidth = 0.018; c.strokeStyle = BLK; c.stroke(); text(c, 'NO', 0.3, 0.37, 0.1); text(c, 'PASSING', 0.32, 0.5, 0.1); text(c, 'ZONE', 0.3, 0.63, 0.1); },
+  donotpass(c) { plate(c, 0.14, 0.04, 0.72, 0.92, WHT, BLK); text(c, 'DO', 0.5, 0.26, 0.19); text(c, 'NOT', 0.5, 0.5, 0.19); text(c, 'PASS', 0.5, 0.74, 0.19); },
+  curve_r(c) { diamond(c); c.strokeStyle = BLK; c.lineWidth = 0.075; c.beginPath(); c.moveTo(0.42, 0.8); c.lineTo(0.42, 0.55); c.quadraticCurveTo(0.42, 0.38, 0.55, 0.32); c.stroke(); arrow(c, 0.52, 0.335, 0.68, 0.27, 0.075, BLK, 1.9); },
+  slippery(c) {
+    diamond(c); c.fillStyle = BLK; rr(c, 0.38, 0.28, 0.24, 0.2, 0.04); c.fill(); c.fillRect(0.36, 0.44, 0.06, 0.08); c.fillRect(0.58, 0.44, 0.06, 0.08);
+    c.strokeStyle = BLK; c.lineWidth = 0.035; for (const x of [0.42, 0.58]) { c.beginPath(); c.moveTo(x, 0.56); c.bezierCurveTo(x - 0.08, 0.62, x + 0.08, 0.68, x, 0.78); c.stroke(); }
+  },
+  divided(c) {
+    diamond(c); c.fillStyle = BLK; rr(c, 0.46, 0.3, 0.08, 0.3, 0.04); c.fill();
+    c.strokeStyle = BLK; c.lineWidth = 0.06; c.beginPath(); c.moveTo(0.5, 0.82); c.lineTo(0.5, 0.7); c.lineTo(0.37, 0.6); c.lineTo(0.37, 0.24); c.moveTo(0.5, 0.7); c.lineTo(0.63, 0.6); c.lineTo(0.63, 0.24); c.stroke();
+  },
+  roadwork(c) { diamond(c, ORG); text(c, 'ROAD', 0.5, 0.39, 0.11); text(c, 'WORK', 0.5, 0.51, 0.11); text(c, 'AHEAD', 0.5, 0.63, 0.11); },
+  allturns(c) { plate(c, 0.04, 0.16, 0.92, 0.68, WHT, BLK); text(c, 'ALL TURNS', 0.5, 0.33, 0.13); text(c, 'FROM', 0.5, 0.5, 0.13); text(c, 'RIGHT LANE', 0.5, 0.67, 0.13); },
+  pedlaw(c) {
+    plate(c, 0.24, 0.02, 0.52, 0.96, WHT, BLK); text(c, 'STATE LAW', 0.5, 0.1, 0.07); person(c, 0.5, 0.33, 0.75);
+    text(c, 'STOP', 0.5, 0.56, 0.11, RED); text(c, 'FOR', 0.5, 0.67, 0.08); text(c, 'WITHIN', 0.5, 0.78, 0.065); text(c, 'CROSSWALK', 0.5, 0.87, 0.06);
+  },
+  shield_i(c) {
+    const sh = () => { c.beginPath(); c.moveTo(0.12, 0.12); c.lineTo(0.88, 0.12); c.bezierCurveTo(0.94, 0.5, 0.8, 0.8, 0.5, 0.95); c.bezierCurveTo(0.2, 0.8, 0.06, 0.5, 0.12, 0.12); c.closePath(); };
+    sh(); c.fillStyle = '#1f4aa8'; c.fill(); c.save(); sh(); c.clip(); c.fillStyle = RED; c.fillRect(0, 0, 1, 0.32); c.restore();
+    sh(); c.lineWidth = 0.025; c.strokeStyle = WHT; c.stroke(); text(c, 'INTERSTATE', 0.5, 0.23, 0.075, WHT); text(c, '78', 0.5, 0.58, 0.32, WHT);
+  },
+  shield_us(c) {
+    plate(c, 0.06, 0.06, 0.88, 0.88, BLK, BLK); c.beginPath(); c.moveTo(0.2, 0.16); c.quadraticCurveTo(0.5, 0.24, 0.8, 0.16); c.bezierCurveTo(0.9, 0.5, 0.76, 0.78, 0.5, 0.88); c.bezierCurveTo(0.24, 0.78, 0.1, 0.5, 0.2, 0.16); c.fillStyle = WHT; c.fill();
+    text(c, '1-9', 0.5, 0.54, 0.26);
+  },
+  shield_nj(c) { plate(c, 0.06, 0.06, 0.88, 0.88, BLK, BLK); c.beginPath(); c.ellipse(0.5, 0.5, 0.38, 0.34, 0, 0, 7); c.fillStyle = WHT; c.fill(); text(c, '139', 0.5, 0.52, 0.24); },
+  hospital(c) { rr(c, 0.1, 0.1, 0.8, 0.8, 0.06); c.fillStyle = BLU; c.fill(); rr(c, 0.13, 0.13, 0.74, 0.74, 0.05); c.lineWidth = 0.02; c.strokeStyle = WHT; c.stroke(); text(c, 'H', 0.5, 0.53, 0.55, WHT); },
   // 路面箭头（白色，贴在地上）
   pv_left(c) { bentArrow(c, -1, WHT, 0.1, 0.6, 0.95, 0.3); },
   pv_right(c) { bentArrow(c, 1, WHT, 0.1, 0.4, 0.95, 0.3); },
@@ -95,6 +123,7 @@ const D = {
 };
 function speed(c, n) { plate(c, 0.14, 0.04, 0.72, 0.92, WHT, BLK); text(c, 'SPEED', 0.5, 0.2, 0.15); text(c, 'LIMIT', 0.5, 0.36, 0.15); text(c, n, 0.5, 0.68, 0.42); }
 
+for (const n of [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 65]) D['speed' + n] = (c) => speed(c, String(n));
 export const SIGN_IDS = Object.keys(D);
 export function drawSign(ctx, id, S) { ctx.save(); ctx.scale(S, S); (D[id] || D.stop)(ctx); ctx.restore(); }
 

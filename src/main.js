@@ -401,10 +401,10 @@ function openBook() {
     let html = '', open = false;
     for (const s of SIGN_BOOK) {
       if (s.cat) { html += (open ? '</div>' : '') + `<div class="cat">${s.cat}</div><div class="signs">`; open = true; continue; }
-      html += `<div class="sign ${s.dark ? 'dark' : ''}"><img src="${signDataURL(s.id)}" alt="${s.en}"><div><b>${s.zh}</b><em>${s.en}</em><p>${s.tip}</p></div></div>`;
+      html += `<div class="sign ${s.dark ? 'dark' : ''}"><img src="${signDataURL(s.id)}" alt="${s.en}"><div><b>${s.zh}</b><em>${s.en}</em>${s.on ? '<span class="tag on">路上有</span>' : ''}${s.tip ? `<p>${s.tip}</p>` : ''}</div></div>`;
     }
     // 交规要点放最前面，标志在后面
-    const rules = '<div class="cat">新泽西交规要点</div><div class="rules">' + RULES_SHEET.map(r => `<div class="rule"><b>${r.t}</b><span class="tag ${r.game ? 'on' : ''}">${r.game ? '游戏里会判' : '游戏里还没有'}</span><p>${r.d}</p></div>`).join('') + '</div>';
+    const rules = '<div class="cat">新泽西交规要点</div><div class="rules">' + RULES_SHEET.map(r => `<div class="rule"><b>${r.t}</b><span class="tag ${r.game ? 'on' : ''}">${r.game ? '会判' : '不判'}</span><p>${r.d}</p></div>`).join('') + '</div>';
     $('bookBody').innerHTML = rules + html + '</div>'; bookBuilt = true;
   }
   show('pause', false); show('book', true); if (S.running) setPaused(true);

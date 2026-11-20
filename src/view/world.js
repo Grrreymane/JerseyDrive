@@ -348,7 +348,7 @@ export function buildWorld(map, scene) {
   const METAL = lin('#9aa3ad'), DARK = lin('#2a2d33'), BACK = lin('#b4bac0'), YELLOW = lin('#f2b632');
   // 竖着的牌子：中心 (x,y,z)，正面朝 (fx,fz)
   const board = (G, x, y, z, fx, fz, w, h, uv) => {
-    const rx = fz, rz = -fx, hw = w / 2, hh = h / 2, e = 0.012;
+    const rx = fz, rz = -fx, hw = w / 2, hh = h / 2, e = 0.055;      // 往正面挪出杆子的半径，杆子才不会从牌面穿出来
     G.quad(x - rx * hw + fx * e, y - hh, z - rz * hw + fz * e, x + rx * hw + fx * e, y - hh, z + rz * hw + fz * e, x + rx * hw + fx * e, y + hh, z + rz * hw + fz * e, x - rx * hw + fx * e, y + hh, z - rz * hw + fz * e, [1, 1, 1], uv);
   };
   const post = (x, z, h, r = 0.35) => { Gm.cyl(x, 0, h, z, 0.04, 0.035, 7, METAL); if (sidefx) occupy(x, z, r); };
@@ -442,13 +442,40 @@ export function buildWorld(map, scene) {
     }
     if (seen.size) post(x, z, 3.75, 1.7);
   }
-  // 限速牌
-  const P = {};
+  // 限速牌和路边的其它牌子
+  const P = {}, rects = map.raw.rects || [[-1e9, -1e9, 1e9, 1e9]];
   for (const s of segs) {
-    if (s.useLen < 90 || s.high || ![20, 25, 35].includes(s.speed)) continue;
-    const put = (sAt, sg) => { pointAt(s, sAt, P); const x = P.x - P.dz * (s.halfW + 0.9) * sg, z = P.z + P.dx * (s.halfW + 0.9) * sg; post(x, z, 2.7); board(Gs, x, 2.25, z, -P.dx * sg, -P.dz * sg, 0.85, 0.85, atlas.uv('speed' + s.speed)); backing(x, 2.25, z, -P.dx * sg, -P.dz * sg, 0.6, 0.76); };
+    if (s.high) continue;
+    // 路边一根杆子一块牌：sg=1 给正向车看（立在右边），-1 给反向车看
+    const put = (sAt, sg, id, w = 0.85, bw = 0.7, bh = 0.88) => { pointAt(s, sAt, P); const x = P.x - P.dz * (s.halfW + 0.9) * sg, z = P.z + P.dx * (s.halfW + 0.9) * sg; post(x, z, 2.7); board(Gs, x, 2.25, z, -P.dx * sg, -P.dz * sg, w, w, atlas.uv(id)); backing(x, 2.25, z, -P.dx * sg, -P.dz * sg, w * bw, w * bh); };
     const inSchool = (q) => s.school && s.school.some(z => q > z.s0 - 10 && q < z.s1 + 10);      // 学校区的牌子上已经写了限速
-    if (!inSchool(s.trimA + 30)) put(s.trimA + 30, 1); if (s.lb > 0 && !inSchool(s.len - s.trimB - 30)) put(s.len - s.trimB - 30, -1);
+    const sA = s.trimA, sB = s.len - s.trimB;
+    if (s.useLen >= 90 && atlas.uv('speed' + s.speed)) { if (!inSchool(sA + 30)) put(sA + 30, 1, 'speed' + s.speed); if (s.lb > 0 && !inSchool(sB - 30)) put(sB - 30, -1, 'speed' + s.speed); }
+    // 快的路上，前方红绿灯 / STOP 提前立黄牌
+    if (s.speed >= 35 && s.useLen >= 130) for (const fwd of [true, false]) {
+      if (fwd ? !s.lf : !s.lb) continue;
+      const j = fwd ? s.jb : s.ja, l = j && j.legs.find(m => m.segRef === s && m.end === (fwd ? 'b' : 'a'));
+      if (!l || !l.approach || j.legs.some(m => m.segRef.high)) continue;
+      const id = j.control === 'signal' ? 'signalahead' : l.stop ? 'stopahead' : null;
+      if (id && !inSchool(fwd ? sB - 75 : sA + 75)) put(fwd ? sB - 75 : sA + 75, fwd ? 1 : -1, id, 0.95, 0.45, 0.45);
+    }
+    // 单行道：开进来十几米，反着开的人迎面看到 WRONG WAY
+    if (s.oneway && s.useLen >= 60) put(sB - 22, -1, 'wrongway', 0.8, 0.85, 0.5);
+    // 断头路：从路口拐进来就看到 DEAD END（另一头不通、也不是地图边）
+    if (!s.oneway && (!s.ja) !== (!s.jb) && s.len < 450 && s.cls !== 'motorway' && s.useLen >= 40) {
+      const free = !s.ja ? 0 : s.len, j = s.ja || s.jb; pointAt(s, free, P);
+      const inside = rects.some(r => P.x > r[0] + 80 && P.x < r[2] - 80 && P.z > r[1] + 80 && P.z < r[3] - 80);
+      if (inside && j.legs.length >= 3 && j.control !== 'joint') { if (s.ja) put(sA + 12, 1, 'deadend', 0.9, 0.45, 0.45); else put(sB - 12, -1, 'deadend', 0.9, 0.45, 0.45); }
+    }
+  }
+  // 单行道接上双向路的地方：TWO-WAY TRAFFIC（给从单行道开过来的车看）
+  for (const j of juncs) {
+    if (j.control !== 'joint' || j.legs.length !== 2) continue;
+    const [p, q] = j.legs, one = p.segRef.oneway ? p : q.segRef.oneway ? q : null, two = one === p ? q : p;
+    if (!one || two.segRef.oneway || one.end !== 'b' || two.segRef.high || two.segRef.useLen < 40) continue;
+    const s = two.segRef; pointAt(s, two.end === 'a' ? s.trimA + 15 : s.len - s.trimB - 15, P);
+    const sg = two.end === 'a' ? 1 : -1, x = P.x - P.dz * (s.halfW + 0.9) * sg, z = P.z + P.dx * (s.halfW + 0.9) * sg;
+    post(x, z, 2.7); board(Gs, x, 2.25, z, -P.dx * sg, -P.dz * sg, 0.95, 0.95, atlas.uv('twoway')); backing(x, 2.25, z, -P.dx * sg, -P.dz * sg, 0.43, 0.43);
   }
   // 学校区（真实学校旁边）：进区的地方立 SCHOOL 牌 + SPEED LIMIT 25 WHEN CHILDREN ARE PRESENT；原来限速更高的路，出区立 END SCHOOL ZONE
   for (const s of segs) {
